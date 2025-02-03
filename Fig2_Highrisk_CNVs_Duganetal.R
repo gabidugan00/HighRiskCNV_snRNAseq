@@ -1,0 +1,275 @@
+#FINAL CODE FOR ALL MAIN FIGURES 
+setwd("/gpfs/gsfs12/users/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Redone_CNVFigures_FollowingMainTextCode")
+library(gtable)
+library(cowplot)
+library(ggplot2)
+library(ggpmisc)
+library("viridis")
+library(plyr)
+library(Seurat)
+library(stringr)
+library(scCustomize)
+library(dplyr)
+library(gridExtra)
+library(cowplot)
+library(Seurat)
+
+#Read in important data 
+#Dreamlet results
+genelistNCvsC_dreamlet <- readRDS("/data/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/Removed_MT_RiboGenes/~CNV+(1|Region)+(1|Match_group)+(1|HBCC_BrNum)/genelistNCvsC_dreamlet")
+
+##################################
+#Figure 2
+##################################
+genelistNCvsC_dreamlet_refrmt <- list()
+for(i in names(genelistNCvsC_dreamlet$Astrocyte)){
+  genelistNCvsC_dreamlet_refrmt[[i]] <- list(genelistNCvsC_dreamlet$Astrocyte[[paste(i)]],genelistNCvsC_dreamlet$Inhibitory_CGE[[paste(i)]],genelistNCvsC_dreamlet$Inhibitory_MGE[[paste(i)]],genelistNCvsC_dreamlet$L2_3Excitatory[[paste(i)]],genelistNCvsC_dreamlet$L5_6Excitatory[[paste(i)]],genelistNCvsC_dreamlet$Microglia[[paste(i)]],genelistNCvsC_dreamlet$Oligodendrocytes[[paste(i)]],genelistNCvsC_dreamlet$OPC[[paste(i)]],genelistNCvsC_dreamlet$VLMC_Endo[[paste(i)]])
+  names(genelistNCvsC_dreamlet_refrmt[[i]]) <- names(genelistNCvsC_dreamlet)
+}
+
+#Deletions 
+for(i in names(genelistNCvsC_dreamlet_refrmt$`CNV22q11.2 del`)){
+  genelistNCvsC_dreamlet_refrmt$`CNV22q11.2 del`[[i]]$CNV.Gene.New <- "NO"
+  genelistNCvsC_dreamlet_refrmt$`CNV22q11.2 del`[[i]]$CNV.Gene.New[genelistNCvsC_dreamlet_refrmt$`CNV22q11.2 del`[[i]]$GRCH.38.Chromosome == "22" & genelistNCvsC_dreamlet_refrmt$`CNV22q11.2 del`[[i]]$GRCH.38.Gene.end >=18924718 		 & genelistNCvsC_dreamlet_refrmt$`CNV22q11.2 del`[[i]]$GRCH.38.Gene.start<= 21111383] <- "YES"
+}
+
+for(i in names(genelistNCvsC_dreamlet_refrmt$`CNV16p11.2 del`)){
+  genelistNCvsC_dreamlet_refrmt$`CNV16p11.2 del`[[i]]$CNV.Gene.New <- "NO"
+  genelistNCvsC_dreamlet_refrmt$`CNV16p11.2 del`[[i]]$CNV.Gene.New[genelistNCvsC_dreamlet_refrmt$`CNV16p11.2 del`[[i]]$GRCH.38.Chromosome == "16" & genelistNCvsC_dreamlet_refrmt$`CNV16p11.2 del`[[i]]$GRCH.38.Gene.end >=29638676	  & genelistNCvsC_dreamlet_refrmt$`CNV16p11.2 del`[[i]]$GRCH.38.Gene.start <= 30188531] <- "YES"
+}
+
+for(i in names(genelistNCvsC_dreamlet_refrmt$`CNV15q11.2 BP1-2 del`)){
+  genelistNCvsC_dreamlet_refrmt$`CNV15q11.2 BP1-2 del`[[i]]$CNV.Gene.New <- "NO"
+  genelistNCvsC_dreamlet_refrmt$`CNV15q11.2 BP1-2 del`[[i]]$CNV.Gene.New[genelistNCvsC_dreamlet_refrmt$`CNV15q11.2 BP1-2 del`[[i]]$GRCH.38.Chromosome == "15" & genelistNCvsC_dreamlet_refrmt$`CNV15q11.2 BP1-2 del`[[i]]$GRCH.38.Gene.end >=22782170	  & genelistNCvsC_dreamlet_refrmt$`CNV15q11.2 BP1-2 del`[[i]]$GRCH.38.Gene.start <= 23040134] <- "YES"
+}
+
+
+for(i in names(genelistNCvsC_dreamlet_refrmt$`CNV1q21.1 del`)){
+  genelistNCvsC_dreamlet_refrmt$`CNV1q21.1 del`[[i]]$CNV.Gene.New <- "NO"
+  genelistNCvsC_dreamlet_refrmt$`CNV1q21.1 del`[[i]]$CNV.Gene.New[genelistNCvsC_dreamlet_refrmt$`CNV1q21.1 del`[[i]]$GRCH.38.Chromosome == "1" & genelistNCvsC_dreamlet_refrmt$`CNV1q21.1 del`[[i]]$GRCH.38.Gene.end >=147105904	  		 & genelistNCvsC_dreamlet_refrmt$`CNV1q21.1 del`[[i]]$GRCH.38.Gene.start <= 147917509
+  ] <- "YES"
+}
+for(i in names(genelistNCvsC_dreamlet_refrmt$`CNV7q11.23 WBS del`)){
+  genelistNCvsC_dreamlet_refrmt$`CNV7q11.23 WBS del`[[i]]$CNV.Gene.New <- "NO"
+  genelistNCvsC_dreamlet_refrmt$`CNV7q11.23 WBS del`[[i]]$CNV.Gene.New[genelistNCvsC_dreamlet_refrmt$`CNV7q11.23 WBS del`[[i]]$GRCH.38.Chromosome == "7" & genelistNCvsC_dreamlet_refrmt$`CNV7q11.23 WBS del`[[i]]$GRCH.38.Gene.end >=73330452				 & genelistNCvsC_dreamlet_refrmt$`CNV7q11.23 WBS del`[[i]]$GRCH.38.Gene.start <= 74728172] <- "YES"
+}
+
+#Duplications
+for(i in names(genelistNCvsC_dreamlet_refrmt$`CNV22q11.2 dup`)){
+  genelistNCvsC_dreamlet_refrmt$`CNV22q11.2 dup`[[i]]$CNV.Gene.New <- "NO"
+  genelistNCvsC_dreamlet_refrmt$`CNV22q11.2 dup`[[i]]$CNV.Gene.New[genelistNCvsC_dreamlet_refrmt$`CNV22q11.2 dup`[[i]]$GRCH.38.Chromosome == "22" & genelistNCvsC_dreamlet_refrmt$`CNV22q11.2 dup`[[i]]$GRCH.38.Gene.end >=18924718 		 & genelistNCvsC_dreamlet_refrmt$`CNV22q11.2 dup`[[i]]$GRCH.38.Gene.start <= 21111383] <- "YES"
+}
+for(i in names(genelistNCvsC_dreamlet_refrmt$`CNV16p11.2 dup`)){
+  genelistNCvsC_dreamlet_refrmt$`CNV16p11.2 dup`[[i]]$CNV.Gene.New <- "NO"
+  genelistNCvsC_dreamlet_refrmt$`CNV16p11.2 dup`[[i]]$CNV.Gene.New[genelistNCvsC_dreamlet_refrmt$`CNV16p11.2 dup`[[i]]$GRCH.38.Chromosome == "16" & genelistNCvsC_dreamlet_refrmt$`CNV16p11.2 dup`[[i]]$GRCH.38.Gene.end >=29638676	  & genelistNCvsC_dreamlet_refrmt$`CNV16p11.2 dup`[[i]]$GRCH.38.Gene.start <= 30188531] <- "YES"
+}
+
+for(i in names(genelistNCvsC_dreamlet_refrmt$`CNV15q11.2 BP1-2 dup`)){
+  genelistNCvsC_dreamlet_refrmt$`CNV15q11.2 BP1-2 dup`[[i]]$CNV.Gene.New <- "NO"
+  genelistNCvsC_dreamlet_refrmt$`CNV15q11.2 BP1-2 dup`[[i]]$CNV.Gene.New[genelistNCvsC_dreamlet_refrmt$`CNV15q11.2 BP1-2 dup`[[i]]$GRCH.38.Chromosome == "15" & genelistNCvsC_dreamlet_refrmt$`CNV15q11.2 BP1-2 dup`[[i]]$GRCH.38.Gene.end >=22782170	  & genelistNCvsC_dreamlet_refrmt$`CNV15q11.2 BP1-2 dup`[[i]]$GRCH.38.Gene.start <= 23040134] <- "YES"
+}
+
+for(i in names(genelistNCvsC_dreamlet_refrmt$`CNV1q21.1 dup`)){
+  genelistNCvsC_dreamlet_refrmt$`CNV1q21.1 dup`[[i]]$CNV.Gene.New <- "NO"
+  genelistNCvsC_dreamlet_refrmt$`CNV1q21.1 dup`[[i]]$CNV.Gene.New[genelistNCvsC_dreamlet_refrmt$`CNV1q21.1 dup`[[i]]$GRCH.38.Chromosome == "1" & genelistNCvsC_dreamlet_refrmt$`CNV1q21.1 dup`[[i]]$GRCH.38.Gene.end >=147105904	  		 & genelistNCvsC_dreamlet_refrmt$`CNV1q21.1 dup`[[i]]$GRCH.38.Gene.start <= 147917509
+  ] <- "YES"
+}
+
+for(i in names(genelistNCvsC_dreamlet_refrmt)){for(j in names(genelistNCvsC_dreamlet_refrmt[[i]])){
+  genelistNCvsC_dreamlet_refrmt[[i]][[j]]$CNV <- paste(i)
+}}
+
+genelistNCvsC_dreamlet_refrmt_merge <- list()
+for(i in names(genelistNCvsC_dreamlet_refrmt)){
+  genelistNCvsC_dreamlet_refrmt_merge[[i]] <- Reduce(rbind,genelistNCvsC_dreamlet_refrmt[[i]])
+}
+
+genelistNCvsC_dreamlet_refrmt_merge_edit<- list()
+for(i in names(genelistNCvsC_dreamlet_refrmt_merge)){
+  genelistNCvsC_dreamlet_refrmt_merge_edit[[i]] <-genelistNCvsC_dreamlet_refrmt_merge[[i]][, colnames(genelistNCvsC_dreamlet_refrmt_merge[[i]]) %in% colnames(genelistNCvsC_dreamlet_refrmt_merge$`CNV7q11.23 WBS del`)]
+}
+
+genelistNCvsC_dreamlet_refrmt_merge_full <- Reduce(rbind,genelistNCvsC_dreamlet_refrmt_merge_edit)
+
+CNV_Regions <- genelistNCvsC_dreamlet_refrmt_merge_full[genelistNCvsC_dreamlet_refrmt_merge_full$CNV.Gene.New == "YES",]
+
+
+CNV_Regions$CNV <- revalue(CNV_Regions$CNV, c("CNV7q11.23 WBS del"="CNV7q11.23 del"))
+CNV_Regions$CNV.Type <- "Deletion"
+CNV_Regions$CNV.Type[grepl("dup",CNV_Regions$CNV)] <- "Duplication"
+CNV_Regions$CNV.Broad <- sub("CNV","",CNV_Regions$CNV)
+CNV_Regions$CNV.Broad <- sub("del","",CNV_Regions$CNV.Broad)
+CNV_Regions$CNV.Broad <- sub("dup","",CNV_Regions$CNV.Broad)
+CNV_Regions$CNV.Type <- factor(CNV_Regions$CNV.Type, levels= c("Duplication","Deletion"))
+CNV_Regions$celltype <- revalue(CNV_Regions$celltype, c("Inhibitory_CGE"="CGE-Derived Inhibitory Neurons", "Inhibitory_MGE"="MGE-Derived Inhibitory Neurons","L2_3Excitatory" ="Upper Layer Excitatory Neurons","L5_6Excitatory"="Lower Layer Excitatory Neurons"))
+CNV_Regions$celltype<-  factor(CNV_Regions$celltype,levels = rev(c("VLMC_Endo","OPC","Oligodendrocytes", "Microglia", "Astrocyte", "Upper Layer Excitatory Neurons", "Lower Layer Excitatory Neurons", "MGE-Derived Inhibitory Neurons", "CGE-Derived Inhibitory Neurons")))
+str(CNV_Regions)
+CNV_Regions$celltype.wrap<- CNV_Regions$celltype
+CNV_Regions$celltype.wrap<-  factor(CNV_Regions$celltype.wrap,levels = rev(c("VLMC_Endo","OPC","Oligodendrocytes", "Microglia", "Astrocyte", "Upper Layer Excitatory Neurons", "Lower Layer Excitatory Neurons", "MGE-Derived Inhibitory Neurons", "CGE-Derived Inhibitory Neurons")))
+
+CNV_Regions$celltype.wrap <- str_wrap(CNV_Regions$celltype.wrap, width = 20)
+CNV_Regions$celltype.wrap<- as.factor(CNV_Regions$celltype.wrap)
+CNV_Regions$celltype.wrap<-  factor(CNV_Regions$celltype.wrap,levels = rev(c("VLMC_Endo","OPC","Oligodendrocytes","Microglia","Astrocyte", "Upper Layer\nExcitatory Neurons","Lower Layer\nExcitatory Neurons", "MGE-Derived\nInhibitory Neurons","CGE-Derived\nInhibitory Neurons")))
+CNV_Regions$FDR_sig <- ""
+CNV_Regions$FDR_sig[CNV_Regions$adj.P.Val <=0.1] <- "*"
+CNV_Regions$CNV.Broad<- factor(CNV_Regions$CNV.Broad,levels =c("1q21.1 ","15q11.2 BP1-2 ", "16p11.2 ", "22q11.2 ", "7q11.23 "))
+CNV_Regions$Significance <- "NS"
+CNV_Regions$Significance[CNV_Regions$P.Value <0.05] <- "Nom.Sig"
+CNV_Regions$Significance[CNV_Regions$adj.P.Val <0.1] <- "FDR.Sig"
+table(CNV_Regions$Significance)
+CNV_Regions$Significance <- factor(CNV_Regions$Significance,levels = rev(c("FDR.Sig", "Nom.Sig", "NS")))
+
+pdf("cnv_genes_boxplot.pdf", width = 13, height = 9)
+ggplot(CNV_Regions, aes(celltype.wrap, logFC,color = CNV.Type)) + 
+  facet_wrap(.~CNV.Broad,labeller = labeller(CNV.Broad = label_wrap_gen(width = 10)), scales="free_x")+
+  geom_boxplot()+
+  geom_jitter(aes(shape = Significance))+
+  theme_cowplot()+
+  geom_hline(yintercept = 0.67,linetype = 3, color = "aquamarine", size =4)+
+  geom_hline(yintercept = -1, linetype = 3, color = "coral", size = 4)+
+  geom_hline(yintercept = 0)+
+  ggtitle("Genes in CNV Region")+
+  scale_color_manual(values = c("aquamarine3","coral2"))+
+  scale_shape_manual(values=c(1,16,18))+
+  xlab("")+
+  theme(plot.title = element_text(hjust =0.5),axis.text.x = element_text(angle = 60, hjust=1, color= "black", size =12),panel.border = element_rect(color = "black", fill = NA))
+dev.off()
+
+
+CNV_Regions_mean <- CNV_Regions %>%
+  group_by(GRCH.38.Chromosome,GRCH.38.Gene.start,GRCH.38.Gene.end,CNV,gene.name) %>%
+  dplyr::summarize(Mean.LogFC = mean(logFC, na.rm=TRUE))
+CNV_Regions_mean$CNV.Type <- "Deletion"
+CNV_Regions_mean$CNV.Type[grepl("dup",CNV_Regions_mean$CNV)] <- "Duplication"
+CNV_Regions_mean$CNV.Broad <- sub("CNV","",CNV_Regions_mean$CNV)
+CNV_Regions_mean$CNV.Broad <- sub("del","",CNV_Regions_mean$CNV.Broad)
+CNV_Regions_mean$CNV.Broad <- sub("dup","",CNV_Regions_mean$CNV.Broad)
+CNV_Regions_mean$CNV.Type <- factor(CNV_Regions_mean$CNV.Type, levels= c("Duplication","Deletion"))
+dput(levels(factor(CNV_Regions_mean$CNV.Broad)))
+CNV_Regions_mean$CNV.Broad<- factor(CNV_Regions_mean$CNV.Broad,levels =c("1q21.1 ","15q11.2 BP1-2 ", "16p11.2 ", "22q11.2 ", "7q11.23 "))
+
+cnv_df <- list()
+for(i in levels(factor(CNV_Regions_mean$CNV.Broad))){
+  cnv_df[[i]] <- CNV_Regions_mean[CNV_Regions_mean$CNV.Broad ==i,]
+}
+
+
+diff<- list()
+for(i in names(cnv_df)){
+  diff[[i]] <- data.frame(min(cnv_df[[i]]$GRCH.38.Gene.start))
+  names(diff[[i]]) <- c("Min")
+  diff[[i]]$Max <- max(cnv_df[[i]]$GRCH.38.Gene.end)
+  diff[[i]]$CNV.Length <-  diff[[i]]$Max- diff[[i]]$Min
+  diff[[i]]$CNV <-i 
+  diff[[i]]$Number.of.Genes <- length(unique(cnv_df[[i]]$gene.name))
+}
+
+cnv_dotplot<- list()
+for(i in levels(factor(CNV_Regions_mean$CNV.Broad))){
+  x <- diff[[i]]$Min +(diff[[i]]$CNV.Length*(3/4))
+  cnv_dotplot[[i]] <- ggplot(cnv_df[[i]], aes(GRCH.38.Gene.start, Mean.LogFC,color = CNV.Type)) + 
+    facet_wrap(.~CNV.Broad, scales= "free",labeller = labeller(CNV.Broad = label_wrap_gen(width = 10)))+
+    annotate(geom="label", x= x, y=1.5, label=diff[[i]]$Number.of.Genes,
+             color="black", size=6)+
+    geom_hline(yintercept = 0.67,linetype = 5, color = "grey50", size=2)+
+    geom_hline(yintercept = -1, linetype = 5, color =  "grey50", size=2)+
+    geom_point(aes(size = 1.5))+
+    ylim(-2.5,1.6)+
+    theme_cowplot()+
+    geom_hline(yintercept = 0)+
+    scale_color_manual(values = c("aquamarine3","coral2"))+
+    scale_fill_manual(values = c("aquamarine3","coral2"))+
+    theme(strip.text.x = element_text(size=25),axis.text.x = element_text(size = 0),axis.title.y = element_text(size = 0),axis.title.x = element_text(size = 0))+NoLegend()
+}
+
+x <- diff$`22q11.2 `$Min +diff$`22q11.2 `$CNV.Length*(3/4)
+cnv_dotplot$`22q11.2 ` <- ggplot(cnv_df$`22q11.2 `, aes(GRCH.38.Gene.start, Mean.LogFC,color = CNV.Type)) + 
+  facet_wrap(.~CNV.Broad, scales= "free",labeller = labeller(CNV.Broad = label_wrap_gen(width = 10)))+
+  annotate(geom="label", x= x, y=1.5, label=diff$`22q11.2 `$Number.of.Genes,
+           color="black", size=6)+
+  geom_point(aes(size = 1.5))+
+  ylim(-2.5,1.6)+
+  theme_cowplot()+
+  geom_hline(yintercept = 0.67,linetype = 5, color = "grey50", size=2)+
+  geom_hline(yintercept = -1, linetype = 5, color =  "grey50", size=2)+
+  geom_hline(yintercept = 0)+
+  scale_color_manual(values = c("aquamarine3","coral2"))+
+  scale_fill_manual(values = c("aquamarine3","coral2"))+
+  theme(plot.title = element_text(hjust =0.5),axis.text.x = element_text(size = 0),axis.title.x = element_text(size = 0),strip.text.x = element_text(size=25))+NoLegend()
+
+x <- diff$`15q11.2 BP1-2 `$Min +diff$`15q11.2 BP1-2 `$CNV.Length*(1/2)
+cnv_dotplot$`15q11.2 BP1-2 ` <- ggplot(cnv_df$`15q11.2 BP1-2 `, aes(GRCH.38.Gene.start, Mean.LogFC,color = CNV.Type)) +
+  facet_wrap(.~CNV.Broad, scales= "free",labeller = labeller(CNV.Broad = label_wrap_gen(width = 10)))+
+  annotate(geom="label", x= x, y=1.5, label=diff$`15q11.2 BP1-2 `$Number.of.Genes,
+           color="black", size=6)+
+  geom_hline(yintercept = 0.67,linetype = 5, color = "grey50", size=2)+
+  geom_hline(yintercept = -1, linetype = 5, color =  "grey50", size=2)+
+  geom_point(aes(size = 1.5))+
+  ylim(-2.5,1.6)+
+  theme_cowplot()+
+  geom_hline(yintercept = 0)+
+  scale_color_manual(values = c("aquamarine3","coral2"))+
+  scale_fill_manual(values = c("aquamarine3","coral2"))+
+  theme(plot.title = element_text(hjust =0.5),axis.text.x = element_text(size = 0), legend.position = "bottom",legend.justification = "center",axis.title.x = element_text(size = 0),strip.text.x = element_text(size=25), legend.text = element_text(size = 12))+
+  guides(color = guide_legend(override.aes = list(size = 10)))
+
+diff_merge <- Reduce(rbind, diff)
+
+legend <- get_legend(cnv_dotplot$`15q11.2 BP1-2 `)
+ggdraw(legend)
+
+cnv_df$`15q11.2 BP1-2`$CNV.Broad <- "15q11.2\nBP1-2"
+cnv_dotplot$`15q11.2 BP1-2` <- ggplot(cnv_df$`15q11.2 BP1-2`, aes(GRCH.38.Gene.start, Mean.LogFC,color = CNV.Type)) + 
+  facet_wrap(.~CNV.Broad, scales= "free",labeller = labeller(CNV.Broad = label_wrap_gen(width = 5)))+
+  annotate(geom="label", x= x, y=1.5, label=diff$`15q11.2 BP1-2 `$Number.of.Genes,
+           color="black",size=6)+
+  geom_point(aes(size = 1.5))+
+  ylim(-2.5,1.6)+
+  theme_cowplot()+
+  geom_hline(yintercept = 0)+
+  geom_hline(yintercept = 0.67,linetype = 5, color = "grey50", size=2)+
+  geom_hline(yintercept = -1, linetype = 5, color =  "grey50", size=2)+
+  scale_color_manual(values = c("aquamarine3","coral2"))+
+  scale_fill_manual(values = c("aquamarine3","coral2"))+
+  theme(strip.text.x = element_text(size=20),axis.title.x = element_text(size = 0),axis.text.x = element_text(size = 0), axis.title.y = element_text(size = 0))+
+  NoLegend()
+
+x <- diff$`7q11.23`$Min +diff$`7q11.23`$CNV.Length*(3/4)
+plot_grid(cnv_dotplot$`7q11.23`)
+
+cnv_dotplot$`7q11.23` <- ggplot(cnv_df$`7q11.23`, aes(GRCH.38.Gene.start, Mean.LogFC,color = CNV.Type)) + 
+  facet_wrap(.~CNV.Broad, scales= "free",labeller = labeller(CNV.Broad = label_wrap_gen(width = 5)))+
+  annotate(geom="label", x= x, y=1.5, label=diff$`7q11.23`$Number.of.Genes,
+           color="black", size=6)+
+  geom_point(aes(size = 1.5))+
+  ylim(-2.5,1.6)+
+  geom_hline(yintercept = 0.67,linetype = 5, color = "grey50", size=2)+
+  geom_hline(yintercept = -1, linetype = 5, color =  "grey50", size=2)+
+  theme_cowplot()+
+  geom_hline(yintercept = 0)+
+  scale_color_manual(values = c("coral2"))+
+  scale_fill_manual(values = c("coral2"))+
+  theme(strip.text.x = element_text(size=20),axis.title.x = element_text(size = 0),axis.text.x = element_text(size = 0), axis.title.y = element_text(size = 0))+
+  NoLegend()
+
+dput(diff_merge$CNV)
+title <- ggdraw() + 
+  draw_label(
+    "Genes in CNV Regions",
+    fontface = 'bold',
+    x = 0.5,
+    hjust = 0.5, size = 35
+  )
+xaxis <- ggdraw() + 
+  draw_label(
+    "Gene Start",
+    fontface = 'bold',
+    x = 0.5,
+    hjust = 0.5
+  )
+
+pdf("CNV_genes_propCNVgenes_addNOgenes_new.pdf", width = 15, height = 7)
+first_row <- plot_grid(cnv_dotplot$`22q11.2`,cnv_dotplot$`16p11.2`,cnv_dotplot$`7q11.23`,cnv_dotplot$`1q21.1`,cnv_dotplot$`15q11.2 BP1-2`, rel_widths =c(40,28,21,13, 12), nrow =1, align="h", axis="bt")
+second_row <- plot_grid(legend)
+plot_grid(title,first_row,xaxis, second_row,nrow =4, rel_heights =c(1,8,0.5,1))
+dev.off()
