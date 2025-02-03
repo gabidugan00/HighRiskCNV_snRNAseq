@@ -1,0 +1,84 @@
+#FINAL CODE FOR ALL MAIN FIGURES 
+setwd("/gpfs/gsfs12/users/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Redone_CNVFigures_FollowingMainTextCode")
+
+#Install libraries
+library(gtable)
+library(cowplot)
+library(ggplot2)
+library(ggpmisc)
+library("viridis")
+library(plyr)
+library(Seurat)
+library(stringr)
+library(scCustomize)
+library(dplyr)
+library(gridExtra)
+library(cowplot)
+library(Seurat)
+
+#Read in important data 
+#Filtered seurat object
+snCNV_spx_nd_adult_MG_fc_MG_fc_MG <- readRDS("/gpfs/gsfs12/users/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/snCNV_spx_nd_adult_MG_fc_MG_fc_MG")
+
+#Dreamlet results
+genelistNCvsC_dreamlet <- readRDS("/data/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/Removed_MT_RiboGenes/~CNV+(1|Region)+(1|Match_group)+(1|HBCC_BrNum)/genelistNCvsC_dreamlet")
+genelistNCvsC_dreamlet_refrmt_editCNVgenes <- readRDS("/data/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/Removed_MT_RiboGenes/~CNV+(1|Region)+(1|Match_group)+(1|HBCC_BrNum)/genelistNCvsC_dreamlet_refrmt_editCNVgenes")
+
+##################################
+#Figure 1
+##################################
+#Remove sample 30
+snCNV_spx_nd_adult_MG_fc_MG_fc_MG<- snCNV_spx_nd_adult_MG_fc_MG_fc_MG[,!grepl("Sample_30",snCNV_spx_nd_adult_MG_fc_MG_fc_MG$orig.ident)]
+
+snCNV_spx_nd_adult_MG_fc_MG_fc_MG$subclass.annotation <- revalue(snCNV_spx_nd_adult_MG_fc_MG_fc_MG$subclass.annotation, c("Inhibitory_CGE"="CGE-Derived Inhibitory Neurons", "Inhibitory_MGE"="MGE-Derived Inhibitory Neurons","L2_3Excitatory" ="Upper Layer Excitatory Neurons","L5_6Excitatory"="Lower Layer Excitatory Neurons")) #change celltype labels 
+snCNV_spx_nd_adult_MG_fc_MG_fc_MG$subclass.annotation<-  factor(snCNV_spx_nd_adult_MG_fc_MG_fc_MG$subclass.annotation,levels = rev(c("VLMC_Endo","OPC","Oligodendrocytes", "Microglia", "Astrocyte", "Upper Layer Excitatory Neurons", "Lower Layer Excitatory Neurons", "MGE-Derived Inhibitory Neurons", "CGE-Derived Inhibitory Neurons")))
+
+#Wrap labels 
+snCNV_spx_nd_adult_MG_fc_MG_fc_MG$subclass.annotation.wrap <- str_wrap(snCNV_spx_nd_adult_MG_fc_MG_fc_MG$subclass.annotation, width = 20)
+
+snCNV_spx_nd_adult_MG_fc_MG_fc_MG$subclass.annotation.wrap<-  factor(snCNV_spx_nd_adult_MG_fc_MG_fc_MG$subclass.annotation.wrap,levels = rev(c("VLMC_Endo","OPC","Oligodendrocytes", "Microglia", "Astrocyte", "Upper Layer\nExcitatory Neurons", "Lower Layer\nExcitatory Neurons", "MGE-Derived\nInhibitory Neurons", "CGE-Derived\nInhibitory Neurons")))
+
+plot_top_marker_vlnplot <- Stacked_VlnPlot(snCNV_spx_nd_adult_MG_fc_MG_fc_MG, group.by = "subclass.annotation.wrap",features = c("RBFOX3","GAD1","ADARB2", "LHX6","SLC17A7","LAMP5","CUX2","AQP4","CX3CR1","MOG","PDGFRA","VIM"), raster =F, pt.size = 0,x_lab_rotate = TRUE,colors_use =c("Astrocyte"="#9983BD", "CGE-Derived\nInhibitory Neurons"="#90D5E4", "MGE-Derived\nInhibitory Neurons"="#3BBCA8", "Lower Layer\nExcitatory Neurons"="#89C75F","Upper Layer\nExcitatory Neurons"="#208A42", "Microglia"="#E6C2DC", "Oligodendrocytes"="#F37B7D", "OPC"="#F59899", "VLMC_Endo"="#C06CAB")) 
+
+
+plot_UMAP <- Seurat::DimPlot(snCNV_spx_nd_adult_MG_fc_MG_fc_MG, reduction = "umap",group.by = "subclass.annotation",label = T, raster =F,repel=T,pt.size= 0.1, cols =c("Astrocyte"="#9983BD", "CGE-Derived Inhibitory Neurons"="#90D5E4", "MGE-Derived Inhibitory Neurons"="#3BBCA8", "Lower Layer Excitatory Neurons"="#89C75F","Upper Layer Excitatory Neurons"="#208A42", "Microglia"="#E6C2DC", "Oligodendrocytes"="#F37B7D", "OPC"="#F59899", "VLMC_Endo"="#C06CAB"))+
+  theme(plot.title = element_blank(),axis.text.x=element_blank(), axis.text.y=element_blank(),axis.ticks=element_blank(),axis.title.x=element_blank(),axis.title.y=element_blank())+
+  NoLegend()
+
+celltype_counts <- data.frame(snCNV_spx_nd_adult_MG_fc_MG_fc_MG$subclass.annotation.wrap) %>%
+  group_by(snCNV_spx_nd_adult_MG_fc_MG_fc_MG$subclass.annotation.wrap) %>%
+  count()
+names(celltype_counts) <- c("Cell.Type", "Nuclei Count")
+
+celltype_counts$Cell.Type<- factor(celltype_counts$Cell.Type,levels = c("VLMC_Endo", "OPC", "Oligodendrocytes", "Microglia", "Astrocyte", "Upper Layer\nExcitatory Neurons", "Lower Layer\nExcitatory Neurons", "MGE-Derived\nInhibitory Neurons", "CGE-Derived\nInhibitory Neurons"))
+
+plot_barplot_counts <- ggplot(celltype_counts, aes(x =`Nuclei Count` ,y=Cell.Type, fill=Cell.Type)) +
+  geom_bar(stat="identity")+
+  geom_col()+
+  theme_cowplot()+
+  scale_fill_manual(values =c("Astrocyte"="#9983BD", "CGE-Derived\nInhibitory Neurons"="#90D5E4", "MGE-Derived\nInhibitory Neurons"="#3BBCA8", "Lower Layer\nExcitatory Neurons"="#89C75F","Upper Layer\nExcitatory Neurons"="#208A42", "Microglia"="#E6C2DC", "Oligodendrocytes"="#F37B7D", "OPC"="#F59899", "VLMC_Endo"="#C06CAB"))+
+  theme(legend.position="none")
+
+celltype_counts_CNV<- data.frame(snCNV_spx_nd_adult_MG_fc_MG_fc_MG$CNV,snCNV_spx_nd_adult_MG_fc_MG_fc_MG$subclass.annotation.wrap)
+celltype_counts_CNV<- celltype_counts_CNV %>%
+  dplyr::group_by(snCNV_spx_nd_adult_MG_fc_MG_fc_MG.CNV,snCNV_spx_nd_adult_MG_fc_MG_fc_MG.subclass.annotation.wrap) %>%
+  dplyr::count()
+names(celltype_counts_CNV) <- c("CNV","Cell Type","Nuclei Count")
+
+celltype_counts_CNV$`Cell Type` <- factor(celltype_counts_CNV$`Cell Type`,levels = c("VLMC_Endo", "OPC", "Oligodendrocytes", "Microglia", "Astrocyte", "Upper Layer\nExcitatory Neurons", "Lower Layer\nExcitatory Neurons", "MGE-Derived\nInhibitory Neurons", "CGE-Derived\nInhibitory Neurons"))
+celltype_counts_CNV$CNV <- factor(celltype_counts_CNV$CNV, levels = c("15q11.2 BP1-2 del", "15q11.2 BP1-2 dup","1q21.1 del", "1q21.1 dup", "16p11.2 del", "16p11.2 dup", "22q11.2 del", "22q11.2 dup", "7q11.23 WBS del","non-carrier"))
+
+plot_propbarplot_counts <- ggplot(celltype_counts_CNV, aes(y =CNV ,x=`Nuclei Count`, fill=`Cell Type`)) +
+  geom_bar(stat="identity", position="fill")+
+  theme_cowplot()+
+  scale_fill_manual(values =c("Astrocyte"="#9983BD", "CGE-Derived\nInhibitory Neurons"="#90D5E4", "MGE-Derived\nInhibitory Neurons"="#3BBCA8", "Lower Layer\nExcitatory Neurons"="#89C75F","Upper Layer\nExcitatory Neurons"="#208A42", "Microglia"="#E6C2DC", "Oligodendrocytes"="#F37B7D", "OPC"="#F59899", "VLMC_Endo"="#C06CAB"))+
+  theme(legend.position="none")
+
+
+second_column_thirdrow <- plot_grid(NULL,plot_UMAP,labels = c('E',''), nrow=1, ncol =2, label_size = 30, rel_widths = c(0.1,2))
+third_column_thirdrow <- plot_grid(NULL,plot_barplot_counts,plot_propbarplot_counts,labels = c('F','','G'),label_size = 30, nrow=3, ncol =1, rel_heights =c(0.05,2,2))
+partone_thirdrow <- plot_grid(second_column_thirdrow,third_column_thirdrow, nrow = 1, rel_widths = c(2.5,1))
+
+pdf("figone.pdf", width = 25, height = 12)
+plot_grid(NULL,plot_top_marker_vlnplot,partone_thirdrow, labels =c("C","",""), rel_widths=c(0.1,1,3), nrow =1, ncol =3, label_size = 30)
+dev.off()
