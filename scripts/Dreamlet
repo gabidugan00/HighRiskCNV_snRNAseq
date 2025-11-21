@@ -1,0 +1,3215 @@
+###
+title: "Adult CNV Samples, Dreamlet"
+author: "Gabi Dugan"
+date: '2023-05-16'
+###
+
+#Notes: This script uses the dreamlet vignette and ~CNV+(1|Region) +(1|HBCC_BrNum)+(1|Match_group)
+
+#Load libraries 
+suppressPackageStartupMessages({
+  library(ggplot2)
+  library(gridExtra)
+  library(dplyr)
+  library(dreamlet)
+  library(limma)
+  library(reshape2)
+  library(data.table)
+  library(knitr)
+  library(stringr)
+  library(RColorBrewer)
+  library(Seurat)
+  library(SingleCellExperiment)
+  library(dreamlet)
+  library(ggplot2)
+  library(tidyverse)
+  library(aplot)
+  library(ggtree)
+  library(scattermore)
+  library(zenith)
+  library(GSEABase)
+  library(qvalue)
+  library(ggcorrplot)
+  library(BiocParallel)
+  library(cowplot)
+  library(DelayedArray)
+})
+
+res.proc_dreamletcountsdefaults<- readRDS("/gpfs/gsfs12/users/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/res.proc_dreamletcountsdefaults")
+res.proc_defaults_remvdgenes<- readRDS("/gpfs/gsfs12/users/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/Removed_MT_RiboGenes/~CNV+(1|Region)+(1|Match_group)+(1|HBCC_BrNum)/res.proc_defaults_remvdgenes")
+res.proc_defaults_remvdgenes_JAN2024<- readRDS("/gpfs/gsfs12/users/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/Removed_MT_RiboGenes/~CNV+(1|Region)+(1|Match_group)+(1|HBCC_BrNum)/ReRun_BrNumCharacter/res.proc_defaults_remvdgenes_JAN2024")
+celltype_count<- readRDS("/data/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/celltype_count")
+celltype_count <- celltype_count[-grep("Sample_30", celltype_count$SampleID),]
+celltype_count$Neuron <- "Glial"
+celltype_count$Neuron[grep("Inhib",celltype_count$Cell.Type)] <- "Inhibitory_Neuron"
+celltype_count$Neuron[grep("Excit",celltype_count$Cell.Type)] <-  "Excitatory_Neuron"
+celltype_split <- split(celltype_count, celltype_count$Cell.Type)
+numeric_vectors_celltype<- list()
+res.pca<- list()
+loadings<- list()
+for(i in names(celltype_split)){
+  numeric_vectors_celltype[[i]] <- data.frame(log(celltype_split[[i]]$Cell.Type.Count),log(celltype_split[[i]]$Sample.Cell.Count),celltype_split[[i]]$celltype_proportion)
+  names(numeric_vectors_celltype[[i]]) <- c("Cell.Type.Counts","Sample.Cell.Counts","Proportion")
+  rownames(numeric_vectors_celltype[[i]]) <- celltype_split[[i]]$SampleID
+  res.pca[[i]] <- prcomp(numeric_vectors_celltype[[i]])
+  print(i)
+  print(res.pca[[i]])
+  loadings[[i]] <- res.pca[[i]]$x
+  assign(paste(i,"Loadings",sep = "_"),loadings[[i]])
+}
+
+numeric_vectors_celltype<- list()
+for(i in names(celltype_split)){
+  numeric_vectors_celltype[[i]] <- data.frame(celltype_split[[i]]$Sample.Cell.Count)
+  numeric_vectors_celltype[[i]]$Cell.Type <- i
+  names(numeric_vectors_celltype[[i]]) <- c("Sample.Cell.Count","Cell.Type")
+  rownames(numeric_vectors_celltype[[i]]) <- celltype_split[[i]]$SampleID
+}
+prop_matrix <-matrix(nrow= 66, ncol=9)
+colnames(prop_matrix) <- unique(names(numeric_vectors_celltype))
+rownames(prop_matrix) <- rownames(numeric_vectors_celltype$`CGE-Derived Inhibitory Neurons`)
+for(i in rownames(prop_matrix)){for(j in colnames(prop_matrix)){
+  prop_matrix[paste(i),paste(j)] <- celltype_split[[j]]$Cell.Type.Count[celltype_split[[j]]$SampleID == paste(i)]
+}}
+res.pca <- prcomp(prop_matrix)
+library(ComplexHeatmap)
+png("PCA_celltypeCounts_rotations.png", height =600,width = 600 ,res = 100)
+plot1 <- Heatmap(res.pca$rotation,cluster_rows = FALSE,cluster_columns = FALSE,heatmap_legend_param = list(color_bar="continuous", title="Rotations"), column_title = "PCA on Cell Type Counts")
+print(plot1)
+dev.off()
+
+png("PCA_celltypeproportions_rotations.png", height =600,width = 600 ,res = 100)
+plot1 <- Heatmap(res.pca$rotation,cluster_rows = FALSE,cluster_columns = FALSE,heatmap_legend_param = list(color_bar="continuous", title="Rotations"), column_title = "PCA on Cell Type Proportions")
+print(plot1)
+dev.off()
+
+library(ggfortify)
+snCNV_adult_metadata<- subset(snCNV_adult_metadata,orig.ident != "Sample_30_HBCC_2550_ACC")
+dput(levels(factor(snCNV_adult_metadata$CNV)))
+snCNV_adult_metadata$CNV <- factor(snCNV_adult_metadata$CNV,levels = c("non-carrier","22q11.2 del", "22q11.2 dup","16p11.2 del", "16p11.2 dup", "7q11.23 WBS del","15q11.2 BP1-2 del", "15q11.2 BP1-2 dup","1q21.1 del", "1q21.1 dup"))
+png("PCA_cellcounts.png", width = 1300, height = 900, res = 100)
+  plot1 <- autoplot(res.pca, data = snCNV_adult_metadata, colour = 'CNV')+
+    theme_cowplot()
+  plot2 <- autoplot(res.pca, data = snCNV_adult_metadata, colour = 'CNV',loadings = TRUE,loadings.label = TRUE, loadings.label.size = 3)+
+    theme_cowplot()
+  plot3 <- autoplot(res.pca, data = snCNV_adult_metadata, colour = 'Region')+
+    theme_cowplot()
+  plot4 <- autoplot(res.pca, data = snCNV_adult_metadata, colour = 'Match_group')+
+    theme_cowplot()
+  grid.arrange(plot1, plot2,plot3,plot4,ncol=2, top=textGrob("PCA on Cell Type Counts", gp=gpar(fontsize=20)))
+dev.off()
+
+barplot<- list()
+for(i in names(celltype_split)){
+  celltype_split[[i]]$SampleID<- factor(celltype_split[[i]]$SampleID, levels = celltype_split[[i]]$SampleID[order(celltype_split[[i]]$celltype_proportion)]) 
+  barplot[[i]] <- ggplot(celltype_split[[i]], aes(x = SampleID,y= celltype_proportion, fill= CNV))+
+    facet_wrap(~Cell.Type, scales = "free")+
+    geom_bar(stat = "identity")+
+    theme(axis.text.x = element_text(angle = 90, hjust=1))
+}
+
+png("celltypeprop_celltype.png", width = 4000,height = 2000, res= 100)
+grid.arrange(barplot$`CGE-Derived Inhibitory Neurons`,barplot$`MGE-Derived Inhibitory Neurons`,barplot$`Upper Excitatory Neurons`,barplot$`Lower Excitatory Neurons`,barplot$Astrocyte,barplot$Microglia,barplot$Oligodendrocytes,barplot$OPC,barplot$VLMC_Endo,ncol= 3)
+dev.off()
+str(pb_adult_dreamlet_remvd_genes$HBCC_BrNum)
+lib.size <- list()
+for(i in names(res.proc_dreamletcountsdefaults)){
+  lib.size[[i]] <- data.frame(res.proc_dreamletcountsdefaults[[i]]$targets)
+  lib.size[[i]]$sample.id <- rownames(lib.size[[i]])
+  lib.size[[i]]$celltype <- i
+  lib.size[[i]]$median_lib <- median(lib.size[[i]]$lib.size)
+}
+
+lib.size <- do.call(rbind, Map(data.frame, lib.size))
+lib.size$CNV <- snCNV_adult_metadata$CNV[match(lib.size$sample.id,snCNV_adult_metadata$orig.ident)]
+library(viridis)
+lib.size$CNV <-  relevel(factor(lib.size$CNV), ref= "non-carrier")
+png("libsize.png", width = 1100, height = 1700, res = 100)
+ggplot2::ggplot(data = lib.size, aes(sample.id, lib.size, fill = CNV)) +
+    geom_bar(position = "stack", stat="identity")+
+    labs(title = "Process Assays, Library Size", subtitle = "By Sample ID and Cell type",
+         y = "Library Size") + 
+  geom_vline(data = lib.size, mapping = aes(xintercept = median_lib)) +
+  scale_fill_viridis(option = "D", discrete = T)+
+  coord_flip()+
+  facet_wrap(~ celltype,ncol=3)+
+  theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust=0.5))
+dev.off()
+
+vp.lst.editMay23<- readRDS("/gpfs/gsfs12/users/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/vp.lst_editMay23")
+
+dataframe <- metadata(pb_adult_dreamlet)$aggr_means
+dataframe$CNV <- snCNV_adult_metadata$CNV[match(dataframe$orig.ident,snCNV_adult_metadata$orig.ident)]
+dataframe$CNV <-  relevel(factor(dataframe$CNV), ref= "non-carrier")
+
+png('percent_mito.png',  width = 1100, height = 1700, res = 100)
+ggplot2::ggplot(data = dataframe, aes(orig.ident, percent.mt, fill = CNV)) +
+  geom_bar(position = "stack", stat="identity")+
+  labs(title = "Aggregated Means, Pseudobulk", subtitle = "By Sample ID and Cell type",
+       y = "Percent Mitochondria") + 
+  scale_fill_viridis(option = "D", discrete = T)+
+  coord_flip()+
+  facet_wrap(~ subclass.annotation,ncol=3)+
+  theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust=0.5))
+dev.off()
+
+png('doublet_score.png',  width = 1100, height = 1700, res = 100)
+ggplot2::ggplot(data = dataframe, aes(orig.ident, scDblFinder.score, fill = CNV)) +
+  geom_bar(position = "stack", stat="identity")+
+  labs(title = "Aggregated Means, Pseudobulk", subtitle = "By Sample ID and Cell type",
+       y = "scDblFinder Doublet Score") + 
+  scale_fill_viridis(option = "D", discrete = T)+
+  coord_flip()+
+  facet_wrap(~ subclass.annotation,ncol=3)+
+  theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust=0.5))
+dev.off()
+
+png('subclass_score.png',  width = 1100, height = 1700, res = 100)
+ggplot2::ggplot(data = dataframe, aes(orig.ident, predicted.subclass.score, fill = CNV)) +
+  geom_bar(position = "stack", stat="identity")+
+  labs(title = "Aggregated Means, Pseudobulk", subtitle = "By Sample ID and Cell type",
+       y = "Azimuth, Subclass Score") + 
+  scale_fill_viridis(option = "D", discrete = T)+
+  coord_flip()+
+  facet_wrap(~ subclass.annotation,ncol=3)+
+  theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust=0.5))
+dev.off()
+vp.lst.editMay23<-readRDS("/data/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/vp.lst_editMay23")
+png("variance_part.png", width = 300)
+plot1 <-plotVarPart(vp.lst.editMay23,label.angle=60) +
+  labs(title = paste(" Variance Partitioning", sep = ""),
+       subtitle = "~CNV+Region+Sex+Age+median.genes.on+bulk_RIN+Sequencing.Saturation \n +Reads.Mapped.Confidently.to.Exonic.Regions+Reads.Mapped.Confidently.to.Transcriptome",
+       caption = paste(", Total Number of Samples: 66", sep = ""))+
+  theme(axis.text.x=element_text(size=12))+
+  theme(plot.title = element_text(hjust = 0.5),plot.subtitle = element_text(hjust = 0.5), plot.caption = element_text(hjust = 0.5,size = 10))
+grid.arrange(plot1)
+dev.off()
+cor.se = function(x,y, method = c("pearson", "kendall", "spearman"),...){
+  
+  method = match.arg(method)
+  
+  if( method == "pearson"){
+    df <- cor.test(x,y, method=method,...) %>%
+      tidy %>%
+      mutate(se = sqrt((1 - estimate^2)/parameter))
+    res = data.frame(rho = df$estimate, rho.se = df$se)
+  }else if(method == "spearman"){
+    # https://stats.stackexchange.com/questions/18887/how-to-calculate-a-confidence-interval-for-spearmans-rank-correlation
+    rho <- cor(x,y, method=method,...)
+    n <- sum(complete.cases(x, y))
+    rho.se <- sqrt((1+rho^2/2)/(n-3))
+    
+    res <- data.frame(rho = rho, rho.se = rho.se)
+  }
+  
+  return(res) 
+}
+
+fig1 = vp.lst.editMay23 %>%
+  group_by(assay) %>%
+  mutate(batch = Match_group) %>%
+  summarize(cor.se(batch, GC, method="spearman")) %>%
+  ggplot(aes(assay, rho, fill=assay)) +
+  geom_bar(stat="identity") + 
+  geom_errorbar(aes(ymin= rho - 1.96*rho.se, ymax= rho + 1.96*rho.se), width=0) +
+  theme_classic() +
+  theme(aspect.ratio=1, 
+        legend.position="none") +
+  xlab("Cell type") +
+  ylab("Spearman correlation between batch % and GC content") +
+  coord_flip() 
+
+vp.correlation <- canCorPairs(~CNV+Region+Sex+Age+median.genes.on+bulk_RIN+Sequencing.Saturation+Reads.Mapped.Confidently.to.Exonic.Regions+Reads.Mapped.Confidently.to.Transcriptome, vp.lst.editMay23)
+library(ComplexHeatmap)
+png("canCor_vp_heatmap.png")
+heatmap_corr <- Heatmap(vp.correlation, col=circlize::colorRamp2(seq(0,1, length = 9), RColorBrewer::brewer.pal(9, "Blues")), rect_gp = gpar(col = 1, lwd = 1),
+                        heatmap_legend_param = list(color_bar="continuous", title="Correlation of VP"), column_title = paste('canCorPairs on Variance Partitioning Object'),
+                        cluster_rows = F, cluster_columns = F, column_title_gp = gpar(fontsize = 10))
+heatmap_corr
+dev.off()
+
+metadata.correlation <- canCorPairs(~Match_group+HBCC_BrNum+CNV+Region+Sex+Age+nFeature_RNA+pH+PMI+bulk_RIN+Sequencing.Saturation+Reads.Mapped.Confidently.to.Exonic.Regions+Reads.Mapped.Confidently.to.Transcriptome, snCNV_adult_metadata)
+
+png("canCor_metadata_heatmap.png")
+heatmap_corr <- Heatmap(metadata.correlation, col=circlize::colorRamp2(seq(0,1, length = 9), RColorBrewer::brewer.pal(9, "Blues")), rect_gp = gpar(col = 1, lwd = 1),
+                        heatmap_legend_param = list(color_bar="continuous", title="Correlation of Metadata"), column_title = paste('canCorPairs on Variance Partitioning Object'),
+                        cluster_rows = F, cluster_columns = F, column_title_gp = gpar(fontsize = 10))
+heatmap_corr
+dev.off()
+
+names(vp.lst.editMay23)  <- c("assay", "gene", "CNV", "Region", "Sex", "Age", "median.genes.on", "bulk_RIN", "Sequencing.Saturation", "Reads.Mapped.Exonic.Regions", "Reads.Mapped.Transcriptome", "Residuals")
+
+vp.correlation<- readRDS("/data/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/~CNV+Region+(1|MG)+(1|HBCC_BrNum)/Default_Settings_Dreamlet/vp.correlation")
+
+form <- ~CNV + (1|Region) + (1 | HBCC_BrNum) + (1 | Match_group)
+res.dl.remvdgenes_JAN2024 <- dreamlet(res.proc_defaults_remvdgenes_JAN2024, form)
+saveRDS(res.dl.remvdgenes_JAN2024,"/gpfs/gsfs12/users/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/Removed_MT_RiboGenes/~CNV+(1|Region)+(1|Match_group)+(1|HBCC_BrNum)/ReRun_BrNumCharacter/res.dl.remvdgenes_JAN2024")
+res.dl_defaults_remvdgenes<- readRDS("/gpfs/gsfs12/users/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/Removed_MT_RiboGenes/~CNV+(1|Region)+(1|Match_group)+(1|HBCC_BrNum)/res.dl_defaults_remvdgenes")
+str(res.dl.remvdgenes_JAN2024$Astrocyte$formula)
+
+# results from full analysis
+genelistNCvsC_dreamlet<- list()
+for(i in names(res.dl.remvdgenes_JAN2024)){for(j in coefNames(res.dl.remvdgenes_JAN2024)[2:10]){
+  print(i)
+  genelistNCvsC_dreamlet[[i]][[j]] <- topTable(res.dl.remvdgenes_JAN2024[[paste(i)]], coef = j, number = Inf,confint=TRUE)
+}}
+
+Genes_inCNVregions <- readRDS("~/Genes_inCNVregions")
+dreamlet_CNVgenes <- list(Genes_inCNVregions$HBCC_6_15q11del,Genes_inCNVregions$HBCC_6_15q11del,Genes_inCNVregions$HBCC_2del,Genes_inCNVregions$HBCC_8dup,Genes_inCNVregions$HBCC_1_1q21del,Genes_inCNVregions$HBCC_2_1q21dup,Genes_inCNVregions$SMRI_2_22q11del,Genes_inCNVregions$SMRI_3_22q11dup,Genes_inCNVregions$UMB_2_7q11del)
+names(dreamlet_CNVgenes) <- names(genelistNCvsC_dreamlet$Astrocyte[2:10])
+
+for (i in names(genelistNCvsC_dreamlet)){for (j in names(genelistNCvsC_dreamlet[[i]])){
+  genelistNCvsC_dreamlet[[i]][[paste(j)]]$diffexpressed <- "NO"
+  # if log2Foldchange > 0.2 and pvalue < 0.05, set as "UP" 
+  genelistNCvsC_dreamlet[[i]][[j]]$diffexpressed[genelistNCvsC_dreamlet[[i]][[j]]$logFC > 0 & genelistNCvsC_dreamlet[[i]][[j]]$P.Value < 0.05] <- "UP"
+  # if log2Foldchange < -0.2 and pvalue < 0.05, set as "DOWN"
+  genelistNCvsC_dreamlet[[i]][[j]]$diffexpressed[genelistNCvsC_dreamlet[[i]][[j]]$logFC < 0 & genelistNCvsC_dreamlet[[i]][[j]]$P.Value < 0.05] <- "DOWN"
+  genelistNCvsC_dreamlet[[i]][[j]]$CNVgene <- 'FALSE'
+  genelistNCvsC_dreamlet[[i]][[j]]$CNVgene[rownames(genelistNCvsC_dreamlet[[i]][[j]]) %in% dreamlet_CNVgenes[[j]]$Gene.name] <- 'TRUE'
+}}
+
+for (i in names(genelistNCvsC_dreamlet)){for (j in names(genelistNCvsC_dreamlet[[i]])){
+  genelistNCvsC_dreamlet[[i]][[paste(j)]]$diffexpressed <- "NO"
+  # if log2Foldchange > 0.2 and pvalue < 0.05, set as "UP" 
+  genelistNCvsC_dreamlet[[i]][[j]]$diffexpressed[genelistNCvsC_dreamlet[[i]][[j]]$logFC > 0 & genelistNCvsC_dreamlet[[i]][[j]]$P.Value < 0.05] <- "UP"
+  # if log2Foldchange < -0.2 and pvalue < 0.05, set as "DOWN"
+  genelistNCvsC_dreamlet[[i]][[j]]$diffexpressed[genelistNCvsC_dreamlet[[i]][[j]]$logFC < 0 & genelistNCvsC_dreamlet[[i]][[j]]$P.Value < 0.05] <- "DOWN"
+  genelistNCvsC_dreamlet[[i]][[j]]$CNVgene <- 'FALSE'
+  genelistNCvsC_dreamlet[[i]][[j]]$CNVgene[rownames(genelistNCvsC_dreamlet[[i]][[j]]) %in% dreamlet_CNVgenes[[j]]$Gene.name] <- 'TRUE'
+}
+}
+
+for(i in names(genelistNCvsC_dreamlet)){for(j in names(genelistNCvsC_dreamlet[[i]])){
+  genelistNCvsC_dreamlet[[i]][[j]]$fdr_0.5 <- 'FALSE'
+  genelistNCvsC_dreamlet[[i]][[j]]$fdr_0.5[genelistNCvsC_dreamlet[[i]][[j]]$adj.P.Val <0.5] <- 'TRUE'
+  genelistNCvsC_dreamlet[[i]][[j]]$fdr_0.1 <- 'FALSE'
+  genelistNCvsC_dreamlet[[i]][[j]]$fdr_0.1[genelistNCvsC_dreamlet[[i]][[j]]$adj.P.Val <0.1] <- 'TRUE'
+  genelistNCvsC_dreamlet[[i]][[j]]$fdr_0.2 <- 'FALSE'
+  genelistNCvsC_dreamlet[[i]][[j]]$fdr_0.2[genelistNCvsC_dreamlet[[i]][[j]]$adj.P.Val <0.2] <- 'TRUE'
+}}
+
+for (i in names(genelistNCvsC_dreamlet)){for(j in names(genelistNCvsC_dreamlet[[i]])){
+  genelistNCvsC_dreamlet[[i]][[j]]$gene.name <- rownames(genelistNCvsC_dreamlet[[i]][[j]])
+}}
+
+DEG_dream<- list()
+DEG_count<- list()
+for (i in names(genelistNCvsC_dreamlet)){for(j in names(genelistNCvsC_dreamlet[[i]])){
+  print(i)
+  print(j)
+  DEG_dream[[j]] <- subset(genelistNCvsC_dreamlet[[i]][[j]], diffexpressed != "NO") %>%
+    group_by(diffexpressed)%>%
+    dplyr::count()
+  DEG_dream[[j]]$celltype <- i
+  DEG_dream[[j]]$group <-j
+}
+  DEG_count[[i]] <- do.call(rbind, Map(data.frame, DEG_dream))
+}
+
+DEG_dream_merge <- do.call(rbind, Map(data.frame,DEG_count))
+table(genelistNCvsC_dreamlet$Astrocyte$`CNV15q11.2 BP1-2 del`$fdr_0.1)
+table(genelistNCvsC_dreamlet_default$Astrocyte$`CNV15q11.2 BP1-2 del`$fdr_0.1)
+table(genelistNCvsC_dreamlet_default$Astrocyte$`CNV22q11.2 del`$fdr_0.1)
+table(genelistNCvsC_dreamlet$Astrocyte$`CNV22q11.2 del`$fdr_0.1)
+
+genelistNCvsC_dreamlet <- readRDS("/data/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/Removed_MT_RiboGenes/~CNV+(1|Region)+(1|Match_group)+(1|HBCC_BrNum)/genelistNCvsC_dreamlet")
+
+DEG_dream <- list()
+DEG_count<- list()
+for (i in names(genelistNCvsC_dreamlet)){for(j in names(genelistNCvsC_dreamlet[[i]])){
+  print(i)
+  print(j)
+  DEG_dream[[i]][[j]] <- subset(genelistNCvsC_dreamlet[[i]][[j]], diffexpressed != "NO")
+  DEG_dream[[i]][[j]]$Key <- paste(DEG_dream[[i]][[j]]$diffexpressed,DEG_dream[[i]][[j]]$fdr_0.1, sep = "_")
+  DEG_dream[[i]][[j]] <- DEG_dream[[i]][[j]] %>%
+    dplyr::group_by(Key)%>%
+    dplyr::count()
+  DEG_dream[[i]][[j]]$celltype <- i
+  DEG_dream[[i]][[j]]$group <-j
+}
+  DEG_count[[i]] <- do.call(rbind, Map(data.frame, DEG_dream[[i]]))
+}
+
+DEG_dream_merge <- do.call(rbind, Map(data.frame,DEG_count))
+library(plyr)
+DEG_dream_merge$Key <- revalue(DEG_dream_merge$Key, c("DOWN_FALSE"="Downregulated", "DOWN_TRUE"="Downregulated (FDR <0.1)","UP_FALSE" ="Upregulated","UP_TRUE"="Upregulated (FDR<0.1)"))
+
+library(ggplot2)
+png("dreamlet_barplot_FDR.png", width = 2200, height = 1300, res = 240)
+ggplot2::ggplot(data = DEG_dream_merge, aes(celltype, n, fill = Key)) +
+  geom_bar(position = "stack", stat="identity")+
+  scale_fill_manual(values=c("dodgerblue","dodgerblue4","firebrick1","firebrick3"))+
+  labs(title = "Dreamlet Results by CNV", subtitle = "~CNV+(1|Region)+(1|MG)+(1|HBCC_BrNum)",
+       y = "Count of DEGs") + 
+  coord_flip()+
+  facet_wrap(~ group,ncol=4)+
+  theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust=0.5))
+dev.off()
+genelistNCvsC_dreamlet<- genelistNCvsC_dreamlet_default
+genelistNCvsC_dreamlet_refrmt <- list()
+for(i in names(genelistNCvsC_dreamlet$Astrocyte)){
+  genelistNCvsC_dreamlet_refrmt[[i]] <- list(genelistNCvsC_dreamlet$Astrocyte[[paste(i)]],genelistNCvsC_dreamlet$Inhibitory_CGE[[paste(i)]],genelistNCvsC_dreamlet$Inhibitory_MGE[[paste(i)]],genelistNCvsC_dreamlet$L2_3Excitatory[[paste(i)]],genelistNCvsC_dreamlet$L5_6Excitatory[[paste(i)]],genelistNCvsC_dreamlet$Microglia[[paste(i)]],genelistNCvsC_dreamlet$Oligodendrocytes[[paste(i)]],genelistNCvsC_dreamlet$OPC[[paste(i)]],genelistNCvsC_dreamlet$VLMC_Endo[[paste(i)]])
+  names(genelistNCvsC_dreamlet_refrmt[[i]]) <- names(genelistNCvsC_dreamlet)
+}
+
+genelistNCvsC_dreamlet_FDR <- list()
+genelistNCvsC_dreamlet_t<- list()
+for(i in names(genelistNCvsC_dreamlet_refrmt)){for(j in names(genelistNCvsC_dreamlet_refrmt[[i]])){
+  genelistNCvsC_dreamlet_FDR[[i]][[j]] <- subset(genelistNCvsC_dreamlet_refrmt[[i]][[j]],adj.P.Val <0.1)
+  genelistNCvsC_dreamlet_t[[i]][[j]] <- subset(genelistNCvsC_dreamlet_refrmt[[i]][[j]],abs(t) >2)
+}}
+
+genelistNCvsC_dreamlet_refrmt<- readRDS("/data/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/Removed_MT_RiboGenes/~CNV+(1|Region)+(1|Match_group)+(1|HBCC_BrNum)/genelistNCvsC_dreamlet_refrmt")
+
+for(i in names(genelistNCvsC_dreamlet)){for(j in names(genelistNCvsC_dreamlet[[i]])){
+  genelistNCvsC_dreamlet[[i]][[j]]$CNV <- j 
+  genelistNCvsC_dreamlet[[i]][[j]]$celltype <- i
+}}
+
+for(i in names(genelistNCvsC_dreamlet_refrmt)){for(j in names(genelistNCvsC_dreamlet_refrmt[[i]])){
+  genelistNCvsC_dreamlet_refrmt[[i]][[j]]$CNV <- i
+  genelistNCvsC_dreamlet_refrmt[[i]][[j]]$celltype <- j
+}}
+
+cnv22q11_mirror <- list(genelistNCvsC_dreamlet_refrmt$`CNV22q11.2 del`,genelistNCvsC_dreamlet_refrmt$`CNV22q11.2 dup`)
+names(cnv22q11_mirror) <- c("CNV22q11.2 del","CNV22q11.2 dup")
+
+cnv22q11_mirror_chromosome <- list()
+for(i in names(cnv22q11_mirror)){for(j in names(cnv22q11_mirror[[i]])){
+  cnv22q11_mirror[[i]][[j]]$Direction <- "UP"
+  cnv22q11_mirror[[i]][[j]]$Direction[cnv22q11_mirror[[i]][[j]]$logFC < 0 ] <- "DOWN"
+  cnv22q11_mirror$`CNV22q11.2 del`[[j]]<- cnv22q11_mirror$`CNV22q11.2 del`[[j]][match(rownames(cnv22q11_mirror$`CNV22q11.2 dup`[[j]]),rownames(cnv22q11_mirror$`CNV22q11.2 del`[[j]])),]
+  cnv22q11_mirror_chromosome[[i]][[j]] <- split(cnv22q11_mirror[[i]][[j]],cnv22q11_mirror[[i]][[j]]$chromosome)
+  cnv22q11_mirror_chromosome[[i]][[j]]<- cnv22q11_mirror_chromosome[[i]][[j]][sort(names(cnv22q11_mirror_chromosome[[i]][[j]]), decreasing = FALSE)] 
+}}
+
+cnv22q11_dir_df <- list()
+for(j in names(cnv22q11_mirror_chromosome[[i]])){for(k in 1:22){
+  cnv22q11_dir_df[[j]][[k]] <- table(cnv22q11_mirror_chromosome$`CNV22q11.2 del`[[j]][[k]]$Direction ==  cnv22q11_mirror_chromosome$`CNV22q11.2 dup`[[j]][[k]]$Direction)
+}
+  names(cnv22q11_dir_df[[j]]) <- names(cnv22q11_mirror_chromosome$`CNV22q11.2 del`[[j]][1:22])
+}
+
+
+for(i in names(cnv22q11_dir_df)){
+  names(cnv22q11_dir_df[[i]]) <- c("chromosome_ 1","chromosome_ 2","chromosome_ 3","chromosome_ 4","chromosome_ 5","chromosome_ 6","chromosome_ 7","chromosome_ 8","chromosome_ 9","chromosome_ 10","chromosome_ 11","chromosome_ 12","chromosome_ 13","chromosome_ 14","chromosome_ 15","chromosome_ 16","chromosome_ 17","chromosome_ 18","chromosome_ 19","chromosome_ 20","chromosome_ 21","chromosome_ 22")
+}
+library(gage)
+library(EnrichmentBrowser)
+library(GSEABase)
+library(aplot)
+library(ggtree)
+library(scattermore)
+library(zenith)
+library(crumblr)
+library(GSEABase)
+library(qvalue)
+library(ggcorrplot)
+library(BiocParallel)
+library(cowplot)
+library(DelayedArray)
+gs1 = "GO0006119: oxidative phosphorylation"
+genes = sort(geneIds(go.gs[[gs1]]))
+
+res.dl_dreamletcountsdefaults$Astrocyte$coefficients[genes %in% rownames(res.dl_dreamletcountsdefaults$Astrocyte$coefficients),]
+oxphos_logFCmatrix<- list()
+for(i in names(res.dl_defaults_remvdgenes)){
+  oxphos_logFCmatrix[[i]]=res.dl_defaults_remvdgenes[[i]]$coefficients[genes %in% rownames(res.dl_defaults_remvdgenes[[i]]$coefficients),] %>%
+    na.omit()
+}
+
+png("heatmap_OXPHOS.png")
+library(viridis)
+heatmap(oxphos_logFCmatrix$Astrocyte)+
+  scale_fill_viridis()
+ggplot(oxphos_logFCmatrix$Astrocyte, aes(x=rownames(oxphos_logFCmatrix$Astrocyte), y= colnames(oxphos_logFCmatrix$Astrocyte), fill= logFC)) + 
+  geom_tile()+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+dev.off()
+
+for(i in names(genelistNCvsC)){
+    #unpack a 3D array
+    mat = genelistNCvsC[[i]]
+    form = sprintf(paste(i,'dreamlet_results.csv'))
+    write.csv(mat, file = form)
+}
+
+df <- data.frame(mat$gene.name,mat$CNV,mat$celltype,mat$logFC)
+names(df) <- c("Gene.Name","CNV","Cell.Type", "logFC")
+melt_data <- melt(df)
+df_wide <- reshape(melt_data, direction = "wide", 
+                   idvar = "Gene.Name", 
+                   timevar = "value")
+
+subset <- genelistNCvsC_dreamlet_refrmt$`CNV22q11.2 del`$Astrocyte
+subset$chromosome <- as.numeric(subset$chromosome)
+table(subset$chromosome)
+subset$gene.start <- as.numeric(subset$gene.start)
+ggmiami(subset, split_by = "logFC", split_at = 0,chr= "chromosome",pos = "gene.start", p = "adj.P.Val",upper_ylab = "FDR, +logFC", lower_ylab = "FDR, -LogFC")
+
+ggplot_volcano <- list()
+volcano_plots <- list()
+names(genelistNCvsC_dreamlet_refrmt$`CNV15q11.2 BP1-2 del`)
+for (i in names(genelistNCvsC_dreamlet_refrmt)){for(j in names(genelistNCvsC_dreamlet_refrmt[[paste(i)]])){
+  print(i)
+  print(j)
+  ggplot_volcano[[j]] <- ggplot(data=genelistNCvsC_dreamlet_refrmt[[paste(i)]][[j]], aes(x=logFC, y=-log10(P.Value), col=diffexpressed)) +
+    geom_point() + 
+    theme_minimal() +
+    scale_color_manual(values=c("blue", "black", "red")) +
+    ggtitle(paste('Dream',i,j,sep=' '))+
+    theme(plot.title = element_text(hjust=0.5))+
+    theme(plot.title = element_text(size=20))
+}
+  volcano_plots[[paste(i)]] <- ggplot_volcano
+  png(paste("dreamlet_volcano",i,".png"), width = 1800, height=2250)
+  grid.arrange(volcano_plots[[paste(i)]]$Astrocyte,volcano_plots[[paste(i)]]$Inhibitory_CGE,volcano_plots[[paste(i)]]$Inhibitory_MGE,volcano_plots[[paste(i)]]$L2_3Excitatory,volcano_plots[[paste(i)]]$L5_6Excitatory,volcano_plots[[paste(i)]]$Microglia,volcano_plots[[paste(i)]]$Oligodendrocytes,volcano_plots[[paste(i)]]$OPC,volcano_plots[[paste(i)]]$VLMC_Endo, ncol = 3,top=textGrob(paste('Dream',i), gp=gpar(fontsize=20)))
+  dev.off()
+}
+
+ggplot_volcano <- list()
+volcano_plots_CNVlabel <- list()
+volcano_plots<- list()
+for (i in names(genelistNCvsC_dreamlet_refrmt)){for(j in names(genelistNCvsC_dreamlet_refrmt[[paste(i)]])){
+  genelist_nonCNV <- subset(genelistNCvsC_dreamlet_refrmt[[paste(i)]][[j]], CNVgene == "FALSE")
+  genelist_CNV <- subset(genelistNCvsC_dreamlet_refrmt[[paste(i)]][[j]], CNVgene == "TRUE")
+  ggplot_volcano[[j]] <- ggplot(data=genelist_nonCNV, aes(x=logFC, y=-log10(P.Value))) +
+    geom_point(color= "grey") + 
+    theme_minimal() +
+    scale_color_manual(values=c("grey")) +
+    ggtitle(paste(j, sep=' '))+
+    theme(plot.title = element_text(hjust=0.5, size = 15))+
+    ylim(0,7)+
+    geom_hline(yintercept=-log10(0.05),linetype="dashed", color = "blue")+
+    geom_point(data=genelist_CNV, aes(x=logFC, y=-log10(P.Value)), color = "red")
+}
+  volcano_plots[[paste(i)]] <- ggplot_volcano
+  png(paste("dreamlet_volcano_label",i,".png"), width = 1800, height=2250, res = 100)
+  grid.arrange(volcano_plots[[paste(i)]]$Astrocyte,volcano_plots[[paste(i)]]$Inhibitory_CGE,volcano_plots[[paste(i)]]$Inhibitory_MGE,volcano_plots[[paste(i)]]$L2_3Excitatory,volcano_plots[[paste(i)]]$L5_6Excitatory,volcano_plots[[paste(i)]]$Microglia,volcano_plots[[paste(i)]]$Oligodendrocytes,volcano_plots[[paste(i)]]$OPC,volcano_plots[[paste(i)]]$VLMC_Endo, ncol = 3,top=textGrob(paste('Dreamlet',i), gp=gpar(fontsize=20)))
+  dev.off()
+}
+
+genes = sort(geneIds(gs.kegg[["hsa00190"]]))
+oxphos_genes_FDR<- list()
+oxphos_genes_t<- list()
+oxphos_genes_t_merge<- list()
+for(i in names(genelistNCvsC_dreamlet_FDR)){for(j in names(genelistNCvsC_dreamlet_FDR[[i]])){
+  oxphos_genes_FDR[[i]][[j]] <- subset(genelistNCvsC_dreamlet_FDR[[i]][[j]],genelistNCvsC_dreamlet_FDR[[i]][[j]]$gene.name %in% genes)
+  oxphos_genes_t[[i]][[j]] <- subset(genelistNCvsC_dreamlet_t[[i]][[j]],genelistNCvsC_dreamlet_t[[i]][[j]]$gene.name %in% genes)
+}
+  oxphos_genes_t_merge[[i]] <- Reduce(rbind,oxphos_genes_t[[i]])
+}
+oxphos_genes_t_merge2 <- Reduce(rbind,oxphos_genes_t_merge)
+oxphos_genes_t_merge2<- oxphos_genes_t_merge2 %>%
+  dplyr::group_by(gene.name) %>%
+  dplyr::count()
+topgenes <- oxphos_genes_t_merge2[order(oxphos_genes_t_merge2$n, decreasing = TRUE),][1:5,]
+
+################################################################
+#Convergence of CNVs 
+################################################################
+deletion_22q11_sig_genes<- list()
+deletion_sig_genes <- list()
+genes_fdr_0.5_22q<- list()
+genes_fdr_0.5_16p<- list()
+genes_fdr_0.5_16p_22q<- list()
+split_genes_fdr_0.5_16p_22q<- list()
+for(i in "CNV22q11.2 del"){for(j in names(genelistNCvsC_dreamlet_refrmt$`CNV22q11.2 del`)){ for(k in "CNV16p11.2 del"){
+  deletion_22q11_sig_genes[[i]][[j]] <- subset(genelistNCvsC_dreamlet_refrmt[[i]][[j]],fdr_0.5 == "TRUE")
+  deletion_sig_genes[[k]][[j]] <- subset(genelistNCvsC_dreamlet_refrmt[[k]][[j]],fdr_0.5 == "TRUE")
+  genes_fdr_0.5_22q[[j]] <- subset(genelistNCvsC_dreamlet_refrmt[[i]][[j]],gene.name %in% deletion_sig_genes[[k]][[j]]$gene.name & fdr_0.5 == "TRUE")
+  genes_fdr_0.5_16p[[j]] <- subset(deletion_sig_genes[[k]][[j]],gene.name %in% genes_fdr_0.5_22q[[j]]$gene.name)
+  genes_fdr_0.5_22q[[j]] <- genes_fdr_0.5_22q[[j]][ order(match(genes_fdr_0.5_22q[[j]]$gene.name, genes_fdr_0.5_16p[[j]]$gene.name)), ]
+  genes_fdr_0.5_22q[[j]]$direction <- 'DIFFERENT'
+  genes_fdr_0.5_22q[[j]]$direction[genes_fdr_0.5_22q[[j]]$diffexpressed == genes_fdr_0.5_16p[[j]]$diffexpressed] <- 'SAME'
+  split_genes_fdr_0.5_16p_22q[[j]] <- split(genes_fdr_0.5_22q[[j]],genes_fdr_0.5_22q[[j]]$direction)
+}}}
+data.frame_fdr_0.5_16p_22q<- list()
+data.frame_fdr_0.5_16p_22q.direction<- list()
+for(i in names(split_genes_fdr_0.5_16p_22q)){for(j in names(split_genes_fdr_0.5_16p_22q[[i]])){
+  data.frame_fdr_0.5_16p_22q[[i]][[j]] <- data_frame(nrow(split_genes_fdr_0.5_16p_22q[[i]][[j]]),length(union(deletion_22q11_sig_genes$`CNV22q11.2 del`[[i]]$gene.name, deletion_sig_genes$`CNV16p11.23 WBS del`[[i]]$gene.name)), i,j)
+  names(data.frame_fdr_0.5_16p_22q[[i]][[j]]) <- c("Intersection","Union","Celltype","Direction")
+}
+  data.frame_fdr_0.5_16p_22q.direction[[i]] <- do.call(rbind, Map(data.frame, data.frame_fdr_0.5_16p_22q[[i]]))
+}
+
+data.frame_fdr_0.5_16p_22q.direction.celltype <- do.call(rbind, Map(data.frame, data.frame_fdr_0.5_16p_22q.direction))
+
+png("cnv22q11_del_intersection_union_direction_fdr05.png")
+plot1 <- ggplot(data.frame_fdr_0.5_16p_22q.direction.celltype, aes(x= Intersection, y = Celltype, fill= Direction))+
+  geom_bar(position = "stack", stat="identity")+
+  labs(title ="22q11 Deletion & 16p11 Deletion",subtitle = "Convergence & Divergence of FDR <0.5 Genes") + 
+  theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust=0.5))
+plot2 <- ggplot(data.frame_fdr_0.5_16p_22q.direction.celltype, aes(x= Intersection/Union, y = Celltype, fill= Celltype))+
+  geom_bar(position = "stack", stat="identity")+
+  labs(title ="22q11 Deletion & 16p11 Deletion",subtitle = "Convergence & Divergence of FDR <0.5 Genes",
+       x = "Intersection/Union") + 
+  theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust=0.5))
+grid.arrange(plot1,plot2)
+dev.off()
+
+deletion_7q11_sig_genes<- list()
+deletion_22q11_sig_genes<- list()
+genes_fdr_0.5_22q<- list()
+genes_fdr_0.5_7q<- list()
+split_genes_fdr_0.5_7q_22q<- list()
+for(i in "CNV22q11.2 del"){for(j in names(genelistNCvsC_dreamlet_refrmt$`CNV22q11.2 del`)){ for(k in "CNV7q11.23 WBS del"){
+  deletion_7q11_sig_genes[[k]][[j]] <- subset(genelistNCvsC_dreamlet_refrmt[[k]][[j]],fdr_0.5 == "TRUE")
+  deletion_22q11_sig_genes[[k]][[j]] <- subset(genelistNCvsC_dreamlet_refrmt[[i]][[j]],fdr_0.5 == "TRUE")
+  genes_fdr_0.5_22q[[j]] <- subset(genelistNCvsC_dreamlet_refrmt[[i]][[j]],gene.name %in% deletion_7q11_sig_genes[[k]][[j]]$gene.name & fdr_0.5 == "TRUE")
+  genes_fdr_0.5_7q[[j]] <- subset(deletion_7q11_sig_genes[[k]][[j]],gene.name %in% genes_fdr_0.5_22q[[j]]$gene.name)
+  genes_fdr_0.5_22q[[j]] <- genes_fdr_0.5_22q[[j]][ order(match(genes_fdr_0.5_22q[[j]]$gene.name, genes_fdr_0.5_7q[[j]]$gene.name)), ]
+  genes_fdr_0.5_22q[[j]]$direction <- 'DIFFERENT'
+  genes_fdr_0.5_22q[[j]]$direction[genes_fdr_0.5_22q[[j]]$diffexpressed == genes_fdr_0.5_7q[[j]]$diffexpressed] <- 'SAME'
+  split_genes_fdr_0.5_7q_22q[[j]] <- split(genes_fdr_0.5_22q[[j]],genes_fdr_0.5_22q[[j]]$direction)
+}}}
+
+data.frame_fdr_0.5_7q_22q<- list()
+data.frame_fdr_0.5_7q_22q.direction<- list()
+for(i in names(split_genes_fdr_0.5_7q_22q)){for(j in names(split_genes_fdr_0.5_7q_22q[[i]])){
+  data.frame_fdr_0.5_7q_22q[[i]][[j]] <- data_frame(nrow(split_genes_fdr_0.5_7q_22q[[i]][[j]]),length(union(deletion_22q11_sig_genes$`CNV22q11.2 del`[[i]]$gene.name, deletion_7q11_sig_genes$`CNV7q11.23 WBS del`[[i]]$gene.name)), i,j)
+  names(data.frame_fdr_0.5_7q_22q[[i]][[j]]) <- c("Intersection","Union","Celltype","Direction")
+}
+  data.frame_fdr_0.5_7q_22q.direction[[i]] <- do.call(rbind, Map(data.frame, data.frame_fdr_0.5_7q_22q[[i]]))
+}
+
+data.frame_fdr_0.5_7q_22q.direction.celltype <- do.call(rbind, Map(data.frame, data.frame_fdr_0.5_7q_22q.direction))
+
+png("cnv22q11_7q11_del_intersection_union_direction_fdr05.png")
+plot1 <- ggplot(data.frame_fdr_0.5_7q_22q.direction.celltype, aes(x= Intersection, y = Celltype, fill= Direction))+
+  geom_bar(position = "stack", stat="identity")+
+  labs(title ="22q11 Deletion & 7q11 Deletion",subtitle = "Convergence & Divergence of FDR <0.5 Genes") + 
+  theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust=0.5))
+plot2 <- ggplot(data.frame_fdr_0.5_7q_22q.direction.celltype, aes(x= Intersection/Union, y = Celltype, fill= Celltype))+
+  geom_bar(position = "stack", stat="identity")+
+  labs(title ="22q11 Deletion & 7q11 Deletion",subtitle = "Convergence & Divergence of FDR <0.5 Genes",
+       x = "Intersection/Union") + 
+  theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust=0.5))
+grid.arrange(plot1,plot2)
+dev.off()
+
+deletion_22q11_sig_genes<- list()
+deletion_sig_genes <- list()
+genes_fdr_0.1_22q<- list()
+genes_fdr_0.1_16p<- list()
+genes_fdr_0.1_16p_22q<- list()
+split_genes_fdr_0.1_16p_22q<- list()
+celltypes <- c("Astrocyte", "Inhibitory_CGE", "Inhibitory_MGE", "L2_3Excitatory", "L5_6Excitatory", "Microglia", "Oligodendrocytes", "OPC")
+for(i in "CNV22q11.2 del"){for(j in celltypes){ for(k in "CNV16p11.2 del"){
+  deletion_22q11_sig_genes[[i]][[j]] <- subset(genelistNCvsC_dreamlet_refrmt[[i]][[j]],fdr_0.1 == "TRUE")
+  deletion_sig_genes[[k]][[j]] <- subset(genelistNCvsC_dreamlet_refrmt[[k]][[j]],fdr_0.1 == "TRUE")
+  genes_fdr_0.1_22q[[j]] <- subset(genelistNCvsC_dreamlet_refrmt[[i]][[j]],gene.name %in% deletion_sig_genes[[k]][[j]]$gene.name & fdr_0.1 == "TRUE")
+  genes_fdr_0.1_16p[[j]] <- subset(deletion_sig_genes[[k]][[j]],gene.name %in% genes_fdr_0.1_22q[[j]]$gene.name)
+  genes_fdr_0.1_22q[[j]] <- genes_fdr_0.1_22q[[j]][ order(match(genes_fdr_0.1_22q[[j]]$gene.name, genes_fdr_0.1_16p[[j]]$gene.name)), ]
+  genes_fdr_0.1_22q[[j]]$direction <- 'DIFFERENT'
+  genes_fdr_0.1_22q[[j]]$direction[genes_fdr_0.1_22q[[j]]$diffexpressed == genes_fdr_0.1_16p[[j]]$diffexpressed] <- 'SAME'
+  split_genes_fdr_0.1_16p_22q[[j]] <- split(genes_fdr_0.1_22q[[j]],genes_fdr_0.1_22q[[j]]$direction)
+}}}
+
+data.frame_fdr_0.1_16p_22q<- list()
+data.frame_fdr_0.1_16p_22q.direction<- list()
+for(i in names(split_genes_fdr_0.1_16p_22q)){for(j in names(split_genes_fdr_0.1_16p_22q[[i]])){
+  data.frame_fdr_0.1_16p_22q[[i]][[j]] <- data_frame(nrow(split_genes_fdr_0.1_16p_22q[[i]][[j]]),length(union(deletion_22q11_sig_genes$`CNV22q11.2 del`[[i]]$gene.name, deletion_sig_genes$`CNV16p11.23 WBS del`[[i]]$gene.name)), i,j)
+  names(data.frame_fdr_0.1_16p_22q[[i]][[j]]) <- c("Intersection","Union","Celltype","Direction")
+}
+  data.frame_fdr_0.1_16p_22q.direction[[i]] <- do.call(rbind, Map(data.frame, data.frame_fdr_0.1_16p_22q[[i]]))
+}
+
+data.frame_fdr_0.1_16p_22q.direction.celltype <- do.call(rbind, Map(data.frame, data.frame_fdr_0.1_16p_22q.direction))
+
+png("cnv22q11_del_intersection_union_direction_fdr01.png")
+plot1 <- ggplot(data.frame_fdr_0.1_16p_22q.direction.celltype, aes(x= Intersection, y = Celltype, fill= Direction))+
+  geom_bar(position = "stack", stat="identity")+
+  labs(title ="22q11 Deletion & 16p11 Deletion",subtitle = "Convergence & Divergence of FDR <0.1 Genes") + 
+  theme(plot.title = element_text(hjust = 0.1), plot.subtitle = element_text(hjust=0.1))
+plot2 <- ggplot(data.frame_fdr_0.1_16p_22q.direction.celltype, aes(x= Intersection/Union, y = Celltype, fill= Celltype))+
+  geom_bar(position = "stack", stat="identity")+
+  labs(title ="22q11 Deletion & 16p11 Deletion",subtitle = "Convergence & Divergence of FDR <0.1 Genes",
+       x = "Intersection/Union") + 
+  theme(plot.title = element_text(hjust = 0.1), plot.subtitle = element_text(hjust=0.1))
+grid.arrange(plot1,plot2)
+dev.off()
+
+deletion_7q11_sig_genes<- list()
+deletion_22q11_sig_genes<- list()
+genes_fdr_0.1_22q<- list()
+genes_fdr_0.1_7q<- list()
+split_genes_fdr_0.1_7q_22q<- list()
+for(i in "CNV22q11.2 del"){for(j in names(genelistNCvsC_dreamlet_refrmt$`CNV22q11.2 del`)){ for(k in "CNV7q11.23 WBS del"){
+  deletion_7q11_sig_genes[[k]][[j]] <- subset(genelistNCvsC_dreamlet_refrmt[[k]][[j]],fdr_0.1 == "TRUE")
+  deletion_22q11_sig_genes[[k]][[j]] <- subset(genelistNCvsC_dreamlet_refrmt[[i]][[j]],fdr_0.1 == "TRUE")
+  genes_fdr_0.1_22q[[j]] <- subset(genelistNCvsC_dreamlet_refrmt[[i]][[j]],gene.name %in% deletion_7q11_sig_genes[[k]][[j]]$gene.name & fdr_0.1 == "TRUE")
+  genes_fdr_0.1_7q[[j]] <- subset(deletion_7q11_sig_genes[[k]][[j]],gene.name %in% genes_fdr_0.1_22q[[j]]$gene.name)
+  genes_fdr_0.1_22q[[j]] <- genes_fdr_0.1_22q[[j]][ order(match(genes_fdr_0.1_22q[[j]]$gene.name, genes_fdr_0.1_7q[[j]]$gene.name)), ]
+  genes_fdr_0.1_22q[[j]]$direction <- 'DIFFERENT'
+  genes_fdr_0.1_22q[[j]]$direction[genes_fdr_0.1_22q[[j]]$diffexpressed == genes_fdr_0.1_7q[[j]]$diffexpressed] <- 'SAME'
+  split_genes_fdr_0.1_7q_22q[[j]] <- split(genes_fdr_0.1_22q[[j]],genes_fdr_0.1_22q[[j]]$direction)
+}}}
+
+data.frame_fdr_0.1_7q_22q<- list()
+data.frame_fdr_0.1_7q_22q.direction<- list()
+for(i in names(split_genes_fdr_0.1_7q_22q)){for(j in names(split_genes_fdr_0.1_7q_22q[[i]])){
+  data.frame_fdr_0.1_7q_22q[[i]][[j]] <- data_frame(nrow(split_genes_fdr_0.1_7q_22q[[i]][[j]]),length(union(deletion_22q11_sig_genes$`CNV22q11.2 del`[[i]]$gene.name, deletion_7q11_sig_genes$`CNV7q11.23 WBS del`[[i]]$gene.name)), i,j)
+  names(data.frame_fdr_0.1_7q_22q[[i]][[j]]) <- c("Intersection","Union","Celltype","Direction")
+}
+  data.frame_fdr_0.1_7q_22q.direction[[i]] <- do.call(rbind, Map(data.frame, data.frame_fdr_0.1_7q_22q[[i]]))
+}
+
+data.frame_fdr_0.1_7q_22q.direction.celltype <- do.call(rbind, Map(data.frame, data.frame_fdr_0.1_7q_22q.direction))
+
+png("cnv22q11_7q11_del_intersection_union_direction_fdr01.png")
+plot1 <- ggplot(data.frame_fdr_0.1_7q_22q.direction.celltype, aes(x= Intersection, y = Celltype, fill= Direction))+
+  geom_bar(position = "stack", stat="identity")+
+  labs(title ="22q11 Deletion & 7q11 Deletion",subtitle = "Convergence & Divergence of FDR <0.1 Genes") + 
+  theme(plot.title = element_text(hjust = 0.1), plot.subtitle = element_text(hjust=0.1))
+plot2 <- ggplot(data.frame_fdr_0.1_7q_22q.direction.celltype, aes(x= Intersection/Union, y = Celltype, fill= Celltype))+
+  geom_bar(position = "stack", stat="identity")+
+  labs(title ="22q11 Deletion & 7q11 Deletion",subtitle = "Convergence & Divergence of FDR <0.1 Genes",
+       x = "Intersection/Union") + 
+  theme(plot.title = element_text(hjust = 0.1), plot.subtitle = element_text(hjust=0.1))
+grid.arrange(plot1,plot2)
+dev.off()
+
+#Create dataframe with genes shared in dream and dreamlet 
+sig_genes_dreamlet<- list()
+t_values_df <- list()
+t_values_df_comb<- list()
+for(i in names(genelistNCvsC_dreamlet)){for(j in names(genelistNCvsC_dreamlet[[i]])){
+  sig_genes_dreamlet[[i]][[j]] <- subset(genelistNCvsC_dreamlet[[i]][[j]],P.Value <0.05)
+  t_values_df[[i]][[j]] <- data.frame(genelistNCvsC_dreamlet[[i]][[j]]$t)
+  colnames(t_values_df[[i]][[j]]) <- c(paste(i,j,sep="_"))
+}
+  t_values_df_comb[[i]] <- cbind(t_values_df[[i]][["CNV15q11.2 BP1-2 del"]],t_values_df[[i]][["CNV15q11.2 BP1-2 dup"]],t_values_df[[i]][["CNV16p11.2 del"]],t_values_df[[i]][["CNV16p11.2 dup"]],t_values_df[[i]][["CNV1q21.1 del"]],t_values_df[[i]][["CNV1q21.1 dup"]],t_values_df[[i]][["CNV22q11.2 del"]],t_values_df[[i]][["CNV22q11.2 dup"]],t_values_df[[i]][["CNV7q11.23 WBS del"]])
+}
+
+t_value_matrix<- list()
+cormat <- list()
+melted_cormat<- list()
+for(i in names(t_values_df_comb)){
+  t_value_matrix[[i]] <- as.matrix(t_values_df_comb[[i]])
+  cormat[[i]] <- cor(t_value_matrix[[i]])
+  melted_cormat[[i]] <- melt(cormat[[i]])
+  melted_cormat[[i]]$celltype <- i
+}
+
+for(i in names(melted_cormat)){for(j in names(melted_cormat[[i]])){
+  print(paste("melted_cormat[[i]][[",j,"]],", sep = ''), quote= FALSE)
+}}
+
+reorder_cormat <- function(cormat){
+  # Use correlation between variables as distance
+  dd <- as.dist((1-cormat)/2)
+  hc <- hclust(dd)
+  cormat <-cormat[hc$order, hc$order]
+}
+
+for(i in names(cormat)){
+  cormat[[i]] <- reorder_cormat(cormat[[i]])
+  melted_cormat[[i]] <- melt(cormat[[i]])
+}
+
+for(i in names(melted_cormat)){
+  plot1 <- ggplot(data = melted_cormat[[i]], aes(x=Var1, y=Var2, fill=value)) + 
+    geom_tile()+
+    ggtitle(paste(i))+
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+    theme(plot.title = element_text(hjust = 0.5))+
+    scale_fill_gradient2(low=muted("blue"), mid = "white",high=muted("red"),na.value = "red",
+                         breaks=seq(-0.1,0.2,0.05), #breaks in the scale bar
+                         limits=c(-0.1,0.2))
+  png(paste("t_values_drmlt_heatmap_reorder",i,j,".png", sep = "_"), width = 1200, height = 1000, res = 120)
+  grid.arrange(plot1)
+  dev.off()
+}
+
+
+FDRsig_genes_dreamlet<- list()
+for(i in names(genelistNCvsC_dreamlet)){for(j in names(genelistNCvsC_dreamlet[[i]])){
+  FDRsig_genes_dreamlet[[i]][[j]] <- subset(genelistNCvsC_dreamlet[[i]][[j]],adj.P.Val <0.2)
+}}
+
+cnv_22q11deletion_sig_genes<- list()
+t_values_df_sig <- list()
+t_values_df_comb_sig <- list()
+for(i in names(genelistNCvsC_dreamlet)){for(j in names(genelistNCvsC_dreamlet[[i]])){
+  cnv_22q11deletion_sig_genes[[i]][[j]] <- genelistNCvsC_dreamlet[[i]][[j]][genelistNCvsC_dreamlet[[i]][[j]]$gene.name %in% FDRsig_genes_dreamlet[[i]]$`CNV22q11.2 del`$gene.name,]
+  t_values_df_sig[[i]][[j]] <- data.frame(cnv_22q11deletion_sig_genes[[i]][[j]]$t)
+  colnames(t_values_df_sig[[i]][[j]]) <- c(paste(i,j,sep="_"))
+}
+  t_values_df_comb_sig[[i]] <- cbind(t_values_df_sig[[i]][["CNV15q11.2 BP1-2 del"]],t_values_df_sig[[i]][["CNV15q11.2 BP1-2 dup"]],t_values_df_sig[[i]][["CNV16p11.2 del"]],t_values_df_sig[[i]][["CNV16p11.2 dup"]],t_values_df_sig[[i]][["CNV1q21.1 del"]],t_values_df_sig[[i]][["CNV1q21.1 dup"]],t_values_df_sig[[i]][["CNV22q11.2 del"]],t_values_df_sig[[i]][["CNV22q11.2 dup"]],t_values_df_sig[[i]][["CNV7q11.23 WBS del"]])
+}
+
+t_value_matrix<- list()
+cormat <- list()
+melted_cormat<- list()
+for(i in names(t_values_df_comb_sig)){
+  t_value_matrix[[i]] <- as.matrix(t_values_df_comb_sig[[i]])
+  cormat[[i]] <- cor(t_value_matrix[[i]])
+}
+
+for(i in names(cormat)){
+  cormat[[i]] <- reorder_cormat(cormat[[i]])
+  melted_cormat[[i]] <- melt(cormat[[i]])
+}
+
+for(i in names(melted_cormat)){
+  plot1 <- ggplot(data = melted_cormat[[i]], aes(x=Var1, y=Var2, fill=value)) + 
+    geom_tile()+
+    ggtitle(paste(i))+
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+    theme(plot.title = element_text(hjust = 0.5))+
+    scale_fill_gradient2(low=muted("blue"), mid = "white",high=muted("red"),na.value = "red",
+                         breaks=seq(-0.2,0.2,0.05), #breaks in the scale bar
+                         limits=c(-0.1,0.2))
+  png(paste("CNV_22q11deletion_FDRsiggenes_t_values_reorder",i,j,".png", sep = "_"), width = 1200, height = 1000, res = 120)
+  grid.arrange(plot1)
+  dev.off()
+}
+
+
+################################################
+#Compare with Limma/DESeq Results
+###############################################
+
+genelistNCvsC_deseq <- readRDS("/data/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/DESEQ/genelistNCvsC_deseq")
+genelistNCvsC_dreamlet <- readRDS("/data/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Limma_Voom/genelistNCvsC_dreamlet")
+
+for(i in names(genelistNCvsC_deseq)){for(j in names(genelistNCvsC_deseq[[i]])){
+  rownames(genelistNCvsC_deseq[[i]][[j]]) <- genelistNCvsC_deseq[[i]][[j]]$gene
+}}
+
+names(genelistNCvsC_dreamlet) <- c("CNV15q11.2 BP1-2 dup","CNV22q11.2 del","CNV22q11.2 dup","CNV1q21.1 del","CNV1q21.1 dup","CNV16p11.2 del","CNV16p11.2 dup","CNV1q21.1 dup","CNV15q11.2 BP1-2 del","CNV15q11.2 BP1-2 dup","CNV1q21.1 dup","CNV7q11.23 WBS del","CNV7q11.23 WBS del")
+names(genelistNCvsC_deseq) <- c("CNV15q11.2 BP1-2 dup","CNV22q11.2 del","CNV22q11.2 dup","CNV1q21.1 del","CNV1q21.1 dup","CNV16p11.2 del","CNV16p11.2 dup","CNV1q21.1 dup","CNV15q11.2 BP1-2 del","CNV15q11.2 BP1-2 dup","CNV1q21.1 dup","CNV7q11.23 WBS del","CNV7q11.23 WBS del")
+
+limma_nomsig <- list()
+deseq_nomsig<- list()
+dreamlet_nomsig <- list()
+for(i in names(genelistNCvsC_dreamlet)){for(j in names(genelistNCvsC_dreamlet[[i]])){
+  limma_nomsig[[i]][[j]] <- subset(genelistNCvsC_dreamlet[[i]][[j]],P.Value <0.05)
+  deseq_nomsig[[i]][[j]] <- subset(genelistNCvsC_deseq[[i]][[j]],pvalue <0.05)
+  rownames(deseq_nomsig[[i]][[j]]) <- deseq_nomsig[[i]][[j]]$gene
+  dreamlet_nomsig[[i]][[j]] <- subset(genelistNCvsC_dreamlet_refrmt[[i]][[j]], P.Value <0.05)
+}}
+
+intersection<- list()
+union <- list()
+intersect_union<- list()
+for(i in names(limma_nomsig)){for(j in names(limma_nomsig[[i]])){
+  intersection[[i]][[j]] <- Reduce(intersect, list(rownames(limma_nomsig[[i]][[j]]),rownames(deseq_nomsig[[i]][[j]]),rownames(deseq_nomsig[[i]][[j]])))
+  union[[i]][[j]] <- Reduce(union, list(rownames(limma_nomsig[[i]][[j]]),rownames(deseq_nomsig[[i]][[j]]),rownames(deseq_nomsig[[i]][[j]])))
+  intersect_union[[i]][[j]] <- length(intersection[[i]][[j]])/length(union[[i]][[j]])
+}}
+dreamlet_fdrsig <- list()
+dreamlet_counts <- list()
+for(i in names(genelistNCvsC_dreamlet_refrmt)){for(j in names(genelistNCvsC_dreamlet_refrmt[[i]])){
+  dreamlet_fdrsig[[i]][[j]] <- subset(genelistNCvsC_dreamlet_refrmt[[i]][[j]],adj.P.Val <0.1)
+}}
+
+dreamlet_counts <- list()
+for(i in names(dreamlet_fdrsig$`CNV22q11.2 del`)){
+  dreamlet_counts[[i]] <- length(dreamlet_fdrsig$`CNV7q11.23 WBS del`[[i]]$logFC)
+}
+
+celltype <- c("Inhibitory_CGE", "Inhibitory_MGE", "L2_3Excitatory", "L5_6Excitatory", "Microglia", "Oligodendrocytes", "OPC", "VLMC_Endo")
+counts <- rbind(dreamlet_counts$Astrocytes,dreamlet_counts$Inhibitory_CGE,dreamlet_counts$Inhibitory_MGE,dreamlet_counts$Microglia,dreamlet_counts$Oligodendrocytes,dreamlet_counts$OPC,dreamlet_counts$VLMC_Endo)
+median(counts)
+
+############################################################
+#MashR
+############################################################
+library(mashr)
+
+res_mash<- list()
+for(i in coefNames(res.dl_dreamletcountsdefaults)){
+  res_mash[[i]] = run_mash(res.dl_dreamletcountsdefaults, coef=paste(i))
+}
+#22q11 Deletion
+# how many gene-by-celltype tests are significant
+# i.e.  if a gene is significant in 2 celltypes, it is counted twice
+table(get_lfsr(res_mash$model) < 0.05, useNA="ifany")
+
+# how many genes are significant in at least one cell type
+table( apply(get_lfsr(res_mash$model), 1, min, na.rm=TRUE) < 0.05)
+#FALSE  TRUE 
+#16682  4097
+
+# how many genes are significant in each cell type
+apply(get_lfsr(res_mash$model), 2, function(x) sum(x < 0.05, na.rm=TRUE))
+
+# examine top set of genes
+
+# gene set analysis using mashr results
+library(zenith)
+
+# Load Gene Ontology database 
+
+go.gs = get_GeneOntology(to="SYMBOL")
+
+# valid values for statistic: 
+# "tstatistic", "abs(tstatistic)", "logFC", "abs(logFC)"
+df_gs = zenith_gsa(res_mash, go.gs)
+
+# Heatmap of results
+png("mashr_22q11del.png", height = 700, width =800, res =95)
+plotZenithResults(df_gs, 5,1)+
+  ggtitle("Mashr, 22q11.2 Deletion")
+dev.off()
+
+
+#7q11 Deletion
+coefNames(res.dl_dreamletcountsdefaults)
+res_mash_7q11 = run_mash(res.dl_dreamletcountsdefaults, coef='CNV7q11.23 WBS del')
+
+# how many gene-by-celltype tests are significant
+# i.e.  if a gene is significant in 2 celltypes, it is counted twice
+table(get_lfsr(res_mash_7q11$model) < 0.05, useNA="ifany")
+
+# how many genes are significant in at least one cell type
+table( apply(get_lfsr(res_mash_7q11$model), 1, min, na.rm=TRUE) < 0.05)
+#FALSE  TRUE 
+#16682  4097
+
+# how many genes are significant in each cell type
+apply(get_lfsr(res_mash_7q11$model), 2, function(x) sum(x < 0.05, na.rm=TRUE))
+
+# examine top set of genes
+# Load Gene Ontology database 
+
+go.gs = get_GeneOntology(to="SYMBOL")
+
+# valid values for statistic: 
+# "tstatistic", "abs(tstatistic)", "logFC", "abs(logFC)"
+df_gs = zenith_gsa(res_mash_7q11, go.gs)
+
+# Heatmap of results
+png("mashr_7q11del.png", height = 700, width =800, res =95)
+plotZenithResults(df_gs, 5,1)+
+  ggtitle("Mashr, 7q11.23 Deletion")
+dev.off()
+
+
+#16p11 Duplication
+coefNames(res.dl_dreamletcountsdefaults)
+res_mash = run_mash(res.dl_dreamletcountsdefaults, coef='CNV16p11.2 dup')
+
+# how many gene-by-celltype tests are significant
+# i.e.  if a gene is significant in 2 celltypes, it is counted twice
+table(get_lfsr(res_mash$model) < 0.05, useNA="ifany")
+
+# how many genes are significant in at least one cell type
+table( apply(get_lfsr(res_mash$model), 1, min, na.rm=TRUE) < 0.05)
+#FALSE  TRUE 
+#16682  4097
+
+# how many genes are significant in each cell type
+apply(get_lfsr(res_mash$model), 2, function(x) sum(x < 0.05, na.rm=TRUE))
+
+# examine top set of genes
+
+# valid values for statistic: 
+# "tstatistic", "abs(tstatistic)", "logFC", "abs(logFC)"
+df_gs = zenith_gsa(res_mash, go.gs)
+
+# Heatmap of results
+png("mashrdup.png", height = 700, width =800, res =95)
+plotZenithResults(df_gs, 5,1)+
+  ggtitle("Mashr, 16p11 Duplication")
+dev.off()
+
+CT = c("Astrocyte", "Inhibitory_CGE", "Inhibitory_MGE", "L2_3Excitatory", "L5_6Excitatory", "Microglia", "Oligodendrocytes", "OPC", "VLMC_Endo")
+
+trimGenesets = function(x){
+  x %>%
+    gsub("^(ER\\d+)_", "", .) %>% 
+    gsub("_\\(GO.*\\)$", "", .) %>% 
+    gsub("_", " ", .)
+}
+
+#16p11 Duplication
+coefNames(res.dl_dreamletcountsdefaults)
+res_mash = run_mash(res.dl_dreamletcountsdefaults, coef='CNV16p11.2 dup')
+
+# how many gene-by-celltype tests are significant
+# i.e.  if a gene is significant in 2 celltypes, it is counted twice
+table(get_lfsr(res_mash$model) < 0.05, useNA="ifany")
+
+# how many genes are significant in at least one cell type
+table( apply(get_lfsr(res_mash$model), 1, min, na.rm=TRUE) < 0.05)
+#FALSE  TRUE 
+#16682  4097
+
+# how many genes are significant in each cell type
+apply(get_lfsr(res_mash$model), 2, function(x) sum(x < 0.05, na.rm=TRUE))
+
+# examine top set of genes
+
+# valid values for statistic: 
+# "tstatistic", "abs(tstatistic)", "logFC", "abs(logFC)"
+df_gs = zenith_gsa(res_mash, go.gs)
+
+# Heatmap of results
+png("mashrdup.png", height = 700, width =800, res =95)
+plotZenithResults(df_gs, 5,1)+
+  ggtitle("Mashr, 16p11 Duplication")
+dev.off()
+
+
+#16p11 Deletion
+coefNames(res.dl_dreamletcountsdefaults)
+res_mash_del = run_mash(res.dl_dreamletcountsdefaults, coef='CNV16p11.2 del')
+
+# how many gene-by-celltype tests are significant
+# i.e.  if a gene is significant in 2 celltypes, it is counted twice
+table(get_lfsr(res_mash_del$model) < 0.05, useNA="ifany")
+
+# how many genes are significant in at least one cell type
+table( apply(get_lfsr(res_mash_del$model), 1, min, na.rm=TRUE) < 0.05)
+#FALSE  TRUE 
+#16682  4097
+
+# how many genes are significant in each cell type
+apply(get_lfsr(res_mash_del$model), 2, function(x) sum(x < 0.05, na.rm=TRUE))
+
+# examine top set of genes
+
+# valid values for statistic: 
+# "tstatistic", "abs(tstatistic)", "logFC", "abs(logFC)"
+df_gs = zenith_gsa(res_mash_del, go.gs)
+
+# Heatmap of results
+png("mashrdel.png", height = 700, width =800, res =95)
+plotZenithResults(df_gs, 5,1)+
+  ggtitle("Mashr, 16p11 Deletion")
+dev.off()
+
+CT = c("Astrocyte", "Inhibitory_CGE", "Inhibitory_MGE", "L2_3Excitatory", "L5_6Excitatory", "Microglia", "Oligodendrocytes", "OPC", "VLMC_Endo")
+library(zenith)
+trimGenesets = function(x){
+  x %>%
+    gsub("^(ER\\d+)_", "", .) %>% 
+    gsub("_\\(GO.*\\)$", "", .) %>% 
+    gsub("_", " ", .)
+}
+res.dl_defaults_remvdgenes$Microglia
+gs1 = "GO0071345: cellular response to cytokine stimulus"
+genes = sort(geneIds(go.gs[[gs1]]))
+
+cell_response_to_cytokine <- res.dl_defaults_remvdgenes$Microglia[rownames(res.dl_defaults_remvdgenes$Microglia) %in% genes,]
+
+for(i in coefNames(res.dl_defaults_remvdgenes)){
+png(paste(i,"_oxphosGO.png", sep =""), res =115, width = 4000)
+  plot1 <- plotGeneHeatmap(res.dl_defaults_remvdgenes, coef=paste(i), 
+                   genes = sort(geneIds(go.gs[[gs1]])), 
+                   assays=CT, transpose=TRUE) + 
+    ggtitle(trimGenesets(gs1), subtitle = paste(i)) + 
+    theme(legend.position = "bottom", 
+          axis.text.x=element_text(size=7.5, angle=90),
+          axis.text.y=element_text(size=7.5)) + 
+    theme(plot.title = element_text(hjust = 0.5),plot.subtitle = element_text(hjust = 0.5))+
+    xlab('') + ylab('')
+  grid.arrange(plot1)
+dev.off()
+}
+
+gs1 = "GO0005746: mitochondrial respirasome"
+png("22q11_mitochondrialrespirasome.png", res =90, width = 650, height = 600)
+plotGeneHeatmap(res.dl_dreamletcountsdefaults, coef="CNV22q11.2 del", 
+                genes = sort(geneIds(go.gs[[gs1]])), 
+                assays=CT, transpose=TRUE) + 
+  ggtitle(trimGenesets(gs1), subtitle = "22q11.2 Deletion") + 
+  theme(legend.position = "bottom", 
+        axis.text.x=element_text(size=7.5, angle=90),
+        axis.text.y=element_text(size=7.5)) + 
+  theme(plot.title = element_text(hjust = 0.5),plot.subtitle = element_text(hjust = 0.5))+
+  xlab('') + ylab('')
+dev.off()
+library(EnrichmentBrowser)
+
+gs1 = "GO0006119: oxidative phosphorylation"
+for(i in coefNames(res.dl_defaults_remvdgenes)){
+  png(paste(i,"OxPhos_Genes.png", sep = "_"), res =90, width = 1200, height = 350)
+  plot1 <- plotGeneHeatmap(res.dl_defaults_remvdgenes, coef=paste(i), 
+                  genes = sort(geneIds(go.gs[[gs1]])), 
+                  assays=CT, transpose=TRUE) + 
+    ggtitle(trimGenesets(gs1), subtitle = paste(i)) + 
+    theme(legend.position = "bottom", 
+          axis.text.x=element_text(size=7.5, angle=90),
+          axis.text.y=element_text(size=7.5)) + 
+    theme(plot.title = element_text(hjust = 0.5),plot.subtitle = element_text(hjust = 0.5))+
+    xlab('') + ylab('')
+  grid.arrange(plot1)
+  dev.off()
+}
+
+png("7q11_DNAJC30.png", res =90, width = 650, height = 600)
+plotGeneHeatmap(res.dl_dreamletcountsdefaults, coef="CNV7q11.23 WBS del", 
+                genes = "DNAJC30", 
+                assays=CT, transpose=TRUE) + 
+  ggtitle("DNAJC30", subtitle = "7q11.23 Deletion") + 
+  theme(legend.position = "bottom", 
+        axis.text.x=element_text(size=7.5, angle=90),
+        axis.text.y=element_text(size=7.5)) + 
+  theme(plot.title = element_text(hjust = 0.5),plot.subtitle = element_text(hjust = 0.5))+
+  xlab('') + ylab('')
+dev.off()
+
+
+############################################################
+#Zenith
+############################################################
+library(zenith)
+
+res_zenith<- list()
+for(i in coefNames(res.dl_dreamletcountsdefaults)[2:10]){
+  res_zenith[[i]] = zenith_gsa(res.dl_dreamletcountsdefaults, coef = paste(i), go.gs, use.ranks=TRUE)
+}
+
+res_zenith<- readRDS("/gpfs/gsfs12/users/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/~CNV+(1|Region)+(1|HBCC_BrNum)+(1|Match_group)/res_zenith")
+
+genelistNCvsC_dreamlet_refrmt <- list()
+for(i in names(genelistNCvsC_dreamlet$Astrocyte)){
+  genelistNCvsC_dreamlet_refrmt[[i]] <- list(genelistNCvsC_dreamlet$Astrocyte[[paste(i)]],genelistNCvsC_dreamlet$Inhibitory_CGE[[paste(i)]],genelistNCvsC_dreamlet$Inhibitory_MGE[[paste(i)]],genelistNCvsC_dreamlet$L2_3Excitatory[[paste(i)]],genelistNCvsC_dreamlet$L5_6Excitatory[[paste(i)]],genelistNCvsC_dreamlet$Microglia[[paste(i)]],genelistNCvsC_dreamlet$Oligodendrocytes[[paste(i)]],genelistNCvsC_dreamlet$OPC[[paste(i)]],genelistNCvsC_dreamlet$VLMC_Endo[[paste(i)]])
+  names(genelistNCvsC_dreamlet_refrmt[[i]]) <- names(genelistNCvsC_dreamlet)
+}
+
+ggplot_volcano <- list()
+volcano_plots_CNVlabel <- list()
+volcano_plots<- list()
+library(grid)
+for (i in names(genelistNCvsC_dreamlet_refrmt)){for(j in names(genelistNCvsC_dreamlet_refrmt[[paste(i)]])){
+  genelist_nonCNV <- subset(genelistNCvsC_dreamlet_refrmt[[paste(i)]][[j]], genelistNCvsC_dreamlet_refrmt[[paste(i)]][[j]]$CNVgene == "FALSE")
+  genelist_CNV <- subset(genelistNCvsC_dreamlet_refrmt[[paste(i)]][[j]], genelistNCvsC_dreamlet_refrmt[[paste(i)]][[j]]$CNVgene == "TRUE")
+  ggplot_volcano[[j]] <- ggplot(data=genelist_nonCNV, aes(x=logFC, y=-log10(P.Value))) +
+    geom_point(color= "grey") + 
+    theme_minimal() +
+    scale_color_manual(values=c("grey")) +
+    ggtitle(paste(j, sep=' '))+
+    ylim(-0.05,7)+
+    theme_cowplot()+
+    theme(plot.title = element_text(hjust=0.5, size = 15))+
+    geom_hline(yintercept=-log10(0.05),linetype="dashed", color = "blue")+
+    geom_point(data=genelist_CNV, aes(x=logFC, y=-log10(P.Value)), color = "red", size =3)
+}
+  names(genelistNCvsC_dreamlet_refrmt$`CNV15q11.2 BP1-2 del`)
+  volcano_plots[[paste(i)]] <- ggplot_volcano
+  png(paste("dreamlet_volcano_label",i,".png"), width = 4000, height=900, res = 120)
+  grid.arrange(volcano_plots[[paste(i)]]$`CGE-Derived Inhibitory Neurons`,volcano_plots[[paste(i)]]$`MGE-Derived Inhibitory Neurons`,volcano_plots[[paste(i)]]$`Lower Excitatory Neurons`,volcano_plots[[paste(i)]]$`Upper Excitatory Neurons`,volcano_plots[[paste(i)]]$Astrocyte,volcano_plots[[paste(i)]]$Microglia,volcano_plots[[paste(i)]]$Oligodendrocytes,volcano_plots[[paste(i)]]$OPC,volcano_plots[[paste(i)]]$VLMC_Endo, ncol = 9,top=textGrob(paste(i), gp=gpar(fontsize=20)))
+  dev.off()
+}
+
+
+fdr_01_reszenith<- list()
+fdr_01_reszenith_unique <-list()
+for(i in names(res_zenith)){
+  fdr_01_reszenith[[i]] <- subset(res_zenith[[i]], FDR <0.1)
+  fdr_01_reszenith_unique[[i]] <- unique(fdr_01_reszenith[[i]]$Geneset)
+}
+
+df <- list()
+for(i in names(res_zenith)){
+  # get genesets with FDR < 5%
+  gs = unique(res_zenith[[i]]$Geneset[res_zenith[[i]]$FDR < 0.1])
+  # keep only results of these genesets 
+  df[[i]] = res_zenith[[i]][res_zenith[[i]]$Geneset %in% gs,]
+  # plot results, but with no limit based on the highest/lowest t-statistic
+}
+
+CT = rev(c("Inhibitory_CGE", "Inhibitory_MGE", "L2_3Excitatory", "L5_6Excitatory","Astrocyte", "Microglia", "Oligodendrocytes", "OPC", "VLMC_Endo"))
+library(zenith)
+trimGenesets = function(x){
+  x %>%
+    gsub("^(ER\\d+)_", "", .) %>% 
+    gsub("_\\(GO.*\\)$", "", .) %>% 
+    gsub("_", " ", .)
+}
+
+gs1 =  "GO0015934: large ribosomal subunit"
+for(i in coefNames(res.dl_dreamletcountsdefaults)[2:10]){
+png(paste(i,"largeribosome.png", sep = "_"), width = 1000,height = 500, res = 92)
+  plot1 <- plotGeneHeatmap(res.dl_dreamletcountsdefaults, coef=i, 
+                           genes = sort(geneIds(go.gs[[gs1]])), 
+                           assays=CT, transpose=TRUE) + 
+    ggtitle(paste(i), subtitle = paste(trimGenesets(gs1))) + 
+    theme(legend.position = "bottom", 
+          axis.text.x=element_text(size=7.5, angle=90),
+          axis.text.y=element_text(size=7.5)) + 
+    xlab('') + ylab('') +
+    theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust=0.5))
+  grid.arrange(plot1)
+dev.off()
+}
+
+gs1 = "GO0032922: circadian regulation of gene expression"
+for(i in coefNames(res.dl_dreamletcountsdefaults)[2:10]){
+  png(paste(i,"circadianreg.png", sep = "_"), width = 700,height = 500, res = 100)
+  plot1 <- plotGeneHeatmap(res.dl_dreamletcountsdefaults, coef=i, 
+                           genes = sort(geneIds(go.gs[[gs1]])), 
+                           assays=CT, transpose=TRUE) + 
+    ggtitle(paste(i), subtitle = paste(trimGenesets(gs1))) + 
+    theme(legend.position = "bottom", 
+          axis.text.x=element_text(size=7.5, angle=90),
+          axis.text.y=element_text(size=7.5)) + 
+    xlab('') + ylab('') +
+    theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust=0.5))
+  grid.arrange(plot1)
+  dev.off()
+}
+library(dreamlet)
+library(GSEABase)
+names(pval_covariates) <- c("Astrocyte", "CGE-Derived Inhibitory Neurons", "MGE-Derived Inhibitory Neurons", "Lower Excitatory Neurons", "Upper Excitatory Neurons", "Microglia", "Oligodendrocytes", "OPC", "VLMC_Endo")
+names(res.dl_defaults_remvdgenes) <- c("Astrocyte", "CGE-Derived Inhibitory Neurons", "MGE-Derived Inhibitory Neurons", "Lower Excitatory Neurons", "Upper Excitatory Neurons", "Microglia", "Oligodendrocytes", "OPC", "VLMC_Endo")
+idx_ord_names = c(2,4,3,6,1,7,8,5,9)
+res.dl_defaults_remvdgenes=res.dl_defaults_remvdgenes[match(rev(idx_ord_names),order(names(res.dl_defaults_remvdgenes))),]
+setGeneric("plotGeneHeatmap", 
+           function(x, coef, genes, assays=assayNames(x), zmax=NULL, transpose=FALSE){
+             
+             standardGeneric("plotGeneHeatmap")
+           })
+setMethod("plotGeneHeatmap", "dreamletResult",
+          function(x, coef, genes, assays=assayNames(x), zmax=NULL, transpose=FALSE){
+            
+            # extract gene-level results
+            tab = topTable(x, coef=coef, number=Inf)
+            tab = tab[tab$ID %in% genes,c("assay", "ID", "z.std", 'adj.P.Val'),drop=FALSE]
+            tab$ID <- factor(tab$ID, levels=genes)
+            
+            if( nrow(tab) == 0) stop("No genes retained")
+            
+            tab = as.data.frame(tab[tab$assay %in% assays,,drop=FALSE])
+            tab = droplevels(tab)
+            tab$assay = factor(tab$assay, assays)
+            
+            if( nrow(tab) == 0) stop("No assays retained")
+            
+            # pass R CMD check
+            assay = ID = z.std = adj.P.Val = NULL
+            
+            # fill empty values with NA
+            tab = as.data.frame(complete(tab, assay, ID))
+            
+            if( is.null(zmax) ){
+              zmax = max(abs(tab$z.std), na.rm=TRUE)
+            }else{
+              if( max(abs(tab$z.std), na.rm=TRUE) > zmax){
+                warning("z.std > zmax", immediate.=TRUE)
+              }
+            }
+            
+            ncol = length(unique(tab$assay))
+            nrow = length(unique(tab$ID))
+            aspect.ratio = nrow / ncol
+            
+            fig = ggplot(tab, aes(assay, ID, fill=z.std, label=ifelse(adj.P.Val < 0.1, '*', ''))) +
+              geom_tile() +
+              theme_classic() +
+              geom_text(vjust=1, hjust=0.5) +
+              scale_fill_gradient2("z-statistic", low="blue", mid="white", high="red", limits=c(-zmax, zmax), na.value="grey70")  +
+              ylab("Gene") +
+              xlab("Cell type")
+            
+            if( transpose ){
+              fig = fig + theme(aspect.ratio=1/aspect.ratio, axis.text.x = element_text(angle = 45, vjust = 1, hjust=1), plot.title = element_text(hjust = 0.5)) + 
+                coord_flip()
+            }else{
+              fig = fig + theme(aspect.ratio=aspect.ratio, axis.text.x = element_text(angle = 45, vjust = 1, hjust=1), plot.title = element_text(hjust = 0.5)) 
+            }
+            
+            fig
+          })
+CT = rev(c("CGE-Derived Inhibitory Neurons", "MGE-Derived Inhibitory Neurons", "Lower Excitatory Neurons", "Upper Excitatory Neurons", "Astrocyte","Microglia", "Oligodendrocytes", "OPC", "VLMC_Endo"))
+gs1 = "GO0071456: cellular response to hypoxia"
+for(i in coefNames(res.dl_defaults_remvdgenes)[2:10]){
+  png(paste(i,"hypoxia.png", sep = "_"), width = 1300,height = 350, res = 100)
+  plot1 <- plotGeneHeatmap(res.dl_defaults_remvdgenes, coef=i, 
+                           genes = sort(geneIds(go.gs[[gs1]])), 
+                           assays=CT, transpose=TRUE) + 
+    ggtitle(paste(i), subtitle = paste(trimGenesets(gs1))) + 
+    theme_cowplot()+
+    theme(legend.position = "bottom", 
+          axis.text.x=element_text(size=7.5, angle=90, hjust =1),
+          axis.text.y=element_text(size=7.5)) + 
+    xlab('') + ylab('') +
+    theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust=0.5))
+  grid.arrange(plot1)
+  dev.off()
+}
+
+gs1 = "GO0019646: aerobic electron transport chain"
+for(i in coefNames(res.dl_defaults_remvdgenes)[2:10]){
+  png(paste(i,"aerobicETC.png", sep = "_"), width = 900,height = 350, res = 100)
+  plot1 <- plotGeneHeatmap(res.dl_defaults_remvdgenes, coef=i, 
+                           genes = sort(geneIds(go.gs[[gs1]])), 
+                           assays=CT, transpose=TRUE) + 
+    ggtitle(paste(i), subtitle = paste(trimGenesets(gs1))) + 
+    theme_cowplot()+
+    theme(legend.position = "bottom", 
+          axis.text.x=element_text(size=7.5, angle=90, hjust =1),
+          axis.text.y=element_text(size=7.5)) + 
+    xlab('') + ylab('') +
+    theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust=0.5))
+  grid.arrange(plot1)
+  dev.off()
+}
+
+gs1 = "GO0042775: mitochondrial ATP synthesis coupled electron transport"
+for(i in coefNames(res.dl_defaults_remvdgenes)[2:10]){
+  png(paste(i,"mitoETC.png", sep = "_"), width = 950,height = 350, res = 100)
+  plot1 <- plotGeneHeatmap(res.dl_defaults_remvdgenes, coef=i, 
+                           genes = sort(geneIds(go.gs[[gs1]])), 
+                           assays=CT, transpose=TRUE) + 
+    ggtitle(paste(i), subtitle = paste(trimGenesets(gs1))) + 
+    theme_cowplot()+
+    theme(legend.position = "bottom", 
+          axis.text.x=element_text(size=7.5, angle=90, hjust =1),
+          axis.text.y=element_text(size=7.5)) + 
+    xlab('') + ylab('') +
+    theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust=0.5))
+  grid.arrange(plot1)
+  dev.off()
+}
+
+gs1 = "GO0061620: glycolytic process through glucose-6-phosphate"
+for(i in coefNames(res.dl_defaults_remvdgenes)[2:10]){
+  png(paste(i,"glycolysis_glucose_process.png", sep = "_"), width = 500,height = 350, res = 100)
+  plot1 <- plotGeneHeatmap(res.dl_defaults_remvdgenes, coef=i, 
+                           genes = sort(geneIds(go.gs[[gs1]])), 
+                           assays=CT, transpose=TRUE) + 
+    ggtitle(paste(i), subtitle = paste("GO0061620: glycolytic process through \n glucose-6-phosphate")) + 
+    theme_cowplot()+
+    theme(legend.position = "bottom", 
+          axis.text.x=element_text(size=7.5, angle=90, hjust =1),
+          axis.text.y=element_text(size=7.5)) + 
+    xlab('') + ylab('') +
+    theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust=0.5))
+  grid.arrange(plot1)
+  dev.off()
+}
+
+gs1 = "GO0061620: glycolytic process through glucose-6-phosphate"
+for(i in coefNames(res.dl_defaults_remvdgenes)[2:10]){
+  png(paste(i,"glycolytic_process.png", sep = "_"), width = 500,height = 350, res = 100)
+  plot1 <- plotGeneHeatmap(res.dl_defaults_remvdgenes, coef=i, 
+                           genes = sort(geneIds(go.gs[[gs1]])), 
+                           assays=CT, transpose=TRUE) + 
+    ggtitle(paste(i), subtitle = paste("GO0061620: glycolytic process through \n glucose-6-phosphate")) + 
+    theme_cowplot()+
+    theme(legend.position = "bottom", 
+          axis.text.x=element_text(size=7.5, angle=90, hjust =1),
+          axis.text.y=element_text(size=7.5)) + 
+    xlab('') + ylab('') +
+    theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust=0.5))
+  grid.arrange(plot1)
+  dev.off()
+}
+gs1 = "GO0022626: cytosolic ribosome"
+for(i in coefNames(res.dl_dreamletcountsdefaults)[2:10]){
+  png(paste(i,"cytosolic_ribosome.png", sep = "_"), width = 1100,height = 900, res = 110)
+  plot1 <- plotGeneHeatmap(res.dl_dreamletcountsdefaults, coef=i, 
+                           genes = sort(geneIds(go.gs[[gs1]])), 
+                           assays=CT, transpose=TRUE) + 
+    ggtitle(paste(i), subtitle = paste(trimGenesets(gs1))) + 
+    theme(legend.position = "bottom", 
+          axis.text.x=element_text(size=7.5, angle=90),
+          axis.text.y=element_text(size=7.5)) + 
+    xlab('') + ylab('') +
+    theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust=0.5))
+  grid.arrange(plot1)
+  dev.off()
+}
+
+gs1 = "GO0005746: mitochondrial respirasome"
+for(i in coefNames(res.dl_dreamletcountsdefaults)[2:10]){
+  png(paste(i,"mitochondrial_respirasome.png", sep = "_"), width = 1100,height = 900, res = 110)
+  plot1 <- plotGeneHeatmap(res.dl_dreamletcountsdefaults, coef=i, 
+                           genes = sort(geneIds(go.gs[[gs1]])), 
+                           assays=CT, transpose=TRUE) + 
+    ggtitle(paste(i), subtitle = paste(trimGenesets(gs1))) + 
+    theme(legend.position = "bottom", 
+          axis.text.x=element_text(size=7.5, angle=90),
+          axis.text.y=element_text(size=7.5)) + 
+    xlab('') + ylab('') +
+    theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust=0.5))
+  grid.arrange(plot1)
+  dev.off()
+}
+
+gs1 = "GO0006123: mitochondrial electron transport, cytochrome c to oxygen"
+for(i in coefNames(res.dl_dreamletcountsdefaults)[2:10]){
+  png(paste(i,"mitochondrial_ETC_cytochrome.png", sep = "_"), width = 700,height = 500, res = 110)
+  plot1 <- plotGeneHeatmap(res.dl_dreamletcountsdefaults, coef=i, 
+                           genes = sort(geneIds(go.gs[[gs1]])), 
+                           assays=CT, transpose=TRUE) + 
+    ggtitle(paste(i), subtitle = paste(trimGenesets(gs1))) + 
+    theme(legend.position = "bottom", 
+          axis.text.x=element_text(size=7.5, angle=90),
+          axis.text.y=element_text(size=7.5)) + 
+    xlab('') + ylab('') +
+    theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust=0.5))
+  grid.arrange(plot1)
+  dev.off()
+}
+dput(go.gs[[gs1]])
+
+shared_terms <- intersect(df$`CNV22q11.2 del`$Geneset,df$`CNV7q11.23 WBS del`$Geneset)
+
+msdb.gs = get_MSigDB("H",to="SYMBOL")
+# Run zenith analysis, and specific which coefficient to evaluate
+
+res.gsa_H<- list()
+for(i in coefNames(res.dl_dreamletcountsdefaults)[2:10]){
+  res.gsa_H[[i]] = zenith_gsa(res.dl_dreamletcountsdefaults, coef = paste(i),msdb.gs)
+}
+
+res.gsa_H<- readRDS("/gpfs/gsfs12/users/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/Removed_MT_RiboGenes/~CNV+(1|Region)+(1|Match_group)+(1|HBCC_BrNum)/MsDB/res.gsa_H")
+
+df <- list()
+for(i in names(res.gsa_H)){
+  # get genesets with FDR < 5%
+  gs = unique(res.gsa_H[[i]]$Geneset[res.gsa_H[[i]]$FDR < 0.1])
+  # keep only results of these genesets 
+  df[[i]] = res.gsa_H[[i]][res.gsa_H[[i]]$Geneset %in% gs,]
+  # plot results, but with no limit based on the highest/lowest t-statistic
+}
+
+for(i in names(df)){
+  df[[i]]$assay <- revalue(df[[i]]$assay, c("Inhibitory_CGE"="CGE-Derived Inhibitory Neurons", "Inhibitory_MGE"="MGE-Derived Inhibitory Neurons","L2_3Excitatory" ="Lower Excitatory Neurons","L5_6Excitatory"="Upper Excitatory Neurons"))
+  df[[i]]$assay <- factor(df[[i]]$assay,levels = rev(c("VLMC_Endo", "OPC", "Oligodendrocytes", "Microglia", "Astrocyte", "Upper Excitatory Neurons", "Lower Excitatory Neurons", "MGE-Derived Inhibitory Neurons", "CGE-Derived Inhibitory Neurons")))
+}
+
+for(i in names(df)){
+  # plot results, but with no limit based on the highest/lowest t-statistic
+  if(length(df[[i]]$assay)>0){
+  png(paste(i,"zenith_MsDB.png"), width = 800, height = 1000, res = 100)
+  plot1 <- plotZenithResults(df[[i]],5,1)+
+    scale_y_discrete(labels = function(y) str_wrap(y, width = 25))
+  grid.arrange(plot1)
+  dev.off()
+  }
+}
+library(fgsea)
+snCNV_spx_nd_adult_MG_fc_MG_fc_MG <- readRDS("/gpfs/gsfs12/users/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/snCNV_spx_nd_adult_MG_fc_MG_fc_MG")
+
+snCNV_spx_nd_adult_MG_fc_MG_fc_MG <-subset(snCNV_spx_nd_adult_MG_fc_MG_fc_MG, orig.ident != "Sample_30_HBCC_2550_ACC")
+
+library(plyr)
+snCNV_spx_nd_adult_MG_fc_MG_fc_MG$subclass.annotation <- revalue(snCNV_spx_nd_adult_MG_fc_MG_fc_MG$subclass.annotation, c("Inhibitory_CGE"="CGE-Derived Inhibitory Neurons", "Inhibitory_MGE"="MGE-Derived Inhibitory Neurons","L2_3Excitatory" ="Lower Excitatory Neurons","L5_6Excitatory"="Upper Excitatory Neurons"))
+dput(levels(factor(snCNV_spx_nd_adult_MG_fc_MG_fc_MG$subclass.annotation)))
+snCNV_spx_nd_adult_MG_fc_MG_fc_MG$subclass.annotation <- factor(snCNV_spx_nd_adult_MG_fc_MG_fc_MG$subclass.annotation, levels =c("CGE-Derived Inhibitory Neurons","MGE-Derived Inhibitory Neurons","Lower Excitatory Neurons","Upper Excitatory Neurons","Astrocyte","Microglia", "Oligodendrocytes","OPC", "VLMC_Endo"))
+
+#Cell type clustering
+png("celltypecluster_LIGHTNINGTalk2023.png", width = 1200,height = 750, res = 92)
+DimPlot(object = snCNV_spx_nd_adult_MG_fc_MG_fc_MG, reduction = "umap", group.by = "subclass.annotation",pt.size = .1,raster = F, label = T,label.size = 5)
+dev.off()
+
+#Check expression of mitochondrial genes across samples from seurat object 
+png("expression_of_mito_genes.png", width = 3300,height = 1500, res = 100)
+VlnPlot(snCNV_spx_nd_adult_MG_fc_MG_fc_MG , features = c("COX7B", "CHCHD6","MTX1","HSPA9","MICU3"), slot = "counts", log = TRUE, pt.size = 0, group.by = "CNV")
+dev.off()
+
+
+gene_list_plot <- c("SLC17A7", "GAD2", "AQP4", "MYT1", "COL1A2", "CLDN5", "OPALIN", "CX3CR1")
+human_colors_list <- c("dodgerblue", "navy", "forestgreen", "darkorange2", "darkorchid3", "orchid",
+                       "orange", "gold", "gray")
+
+library(viridis)
+library(Seurat)
+install.packages("scCustomize")
+library(scCustomize)
+library(qs)
+Idents(snCNV_spx_nd_adult_MG_fc_MG_fc_MG) <- snCNV_spx_nd_adult_MG_fc_MG_fc_MG$orig.ident
+# Create Plots
+png("stacked_violinplot.png", width = 900, height = 900)
+Stacked_VlnPlot(seurat_object = snCNV_spx_nd_adult_MG_fc_MG_fc_MG, features = gene_list_plot, x_lab_rotate = TRUE, colors_use = human_colors_list)
+dev.off()
+
+##############################################################
+#Add in cell count as covariate
+##############################################################
+cell.countsample <- split(cell.counts,cell.counts$snCNV_spx_nd_adult_MG_fc_MG_fc_MG.orig.ident)
+counts <- list()
+for(i in names(cell.countsample)){
+  counts[[i]] <- data_frame(sum(cell.countsample[[i]]$n),i)
+  names(counts[[i]]) <- c("cell.count","orig.ident")
+}
+
+counts <- do.call(rbind, Map(data.frame, counts))
+
+pb_adult_dreamlet <-readRDS("/gpfs/gsfs12/users/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/pb_adult_dreamlet")
+pb_adult_dreamlet$cell.counts <- counts$cell.count[match(colnames(pb_adult_dreamlet), counts$orig.ident)]
+pb_adult_dreamlet$CNV <-  relevel(factor(pb_adult_dreamlet$CNV), ref= "non-carrier")
+form <- ~CNV + cell.counts+(1|Region) + (1 | HBCC_BrNum) + (1 | Match_group)
+
+# Normalize and apply voom/voomWithDreamWeights
+res.proc_defaults_cellcount = processAssays(pb_adult_dreamlet, form, min.cells=0)
+res.proc_defaults_cellcount<- readRDS("/gpfs/gsfs12/users/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/~CNV+cell.counts+(1|Region)+(1|HBCC_BrNum)+(1|Match_group)/res.proc_defaults_cellcount")
+
+res.proc_defaults_cellcount$Astrocyte 
+res.dl_defaults_cellcount <- dreamlet(res.proc_defaults_cellcount, form)
+res.dl_defaults_cellcount<- readRDS("/gpfs/gsfs12/users/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/~CNV+cell.counts+(1|Region)+(1|HBCC_BrNum)+(1|Match_group)/res.dl_defaults_cellcount")
+coefNames(res.dl_defaults_cellcount)
+# results from full analysis
+genelistNCvsC_dreamlet_cellcounts<- list()
+for(i in names(res.dl_defaults_cellcount)){for(j in "cell.counts"){
+  print(i)
+  genelistNCvsC_dreamlet_cellcounts[[i]][[j]] <- topTable(res.dl_defaults_cellcount[[paste(i)]], coef = j, number = Inf)
+}}
+Genes_inCNVregions <- readRDS("~/Genes_inCNVregions")
+dreamlet_CNVgenes <- list(Genes_inCNVregions$HBCC_6_15q11del,Genes_inCNVregions$HBCC_6_15q11del,Genes_inCNVregions$HBCC_2del,Genes_inCNVregions$HBCC_8dup,Genes_inCNVregions$HBCC_1_1q21del,Genes_inCNVregions$HBCC_2_1q21dup,Genes_inCNVregions$SMRI_2_22q11del,Genes_inCNVregions$SMRI_3_22q11dup,Genes_inCNVregions$UMB_2_7q11del)
+names(dreamlet_CNVgenes) <- names(genelistNCvsC_dreamlet_cellcounts$Astrocyte)
+
+for (i in names(genelistNCvsC_dreamlet_cellcounts)){for (j in names(genelistNCvsC_dreamlet_cellcounts[[i]])){
+  genelistNCvsC_dreamlet_cellcounts[[i]][[paste(j)]]$diffexpressed <- "NO"
+  # if log2Foldchange > 0.2 and pvalue < 0.05, set as "UP" 
+  genelistNCvsC_dreamlet_cellcounts[[i]][[j]]$diffexpressed[genelistNCvsC_dreamlet_cellcounts[[i]][[j]]$logFC > 0 & genelistNCvsC_dreamlet_cellcounts[[i]][[j]]$P.Value < 0.05] <- "UP"
+  # if log2Foldchange < -0.2 and pvalue < 0.05, set as "DOWN"
+  genelistNCvsC_dreamlet_cellcounts[[i]][[j]]$diffexpressed[genelistNCvsC_dreamlet_cellcounts[[i]][[j]]$logFC < 0 & genelistNCvsC_dreamlet_cellcounts[[i]][[j]]$P.Value < 0.05] <- "DOWN"
+  genelistNCvsC_dreamlet_cellcounts[[i]][[j]]$CNVgene <- 'FALSE'
+  genelistNCvsC_dreamlet_cellcounts[[i]][[j]]$CNVgene[rownames(genelistNCvsC_dreamlet_cellcounts[[i]][[j]]) %in% dreamlet_CNVgenes[[j]]$Gene.name] <- 'TRUE'
+}}
+
+for (i in names(genelistNCvsC_dreamlet_cellcounts)){for (j in names(genelistNCvsC_dreamlet_cellcounts[[i]])){
+  genelistNCvsC_dreamlet_cellcounts[[i]][[paste(j)]]$diffexpressed <- "NO"
+  # if log2Foldchange > 0.2 and pvalue < 0.05, set as "UP" 
+  genelistNCvsC_dreamlet_cellcounts[[i]][[j]]$diffexpressed[genelistNCvsC_dreamlet_cellcounts[[i]][[j]]$logFC > 0 & genelistNCvsC_dreamlet_cellcounts[[i]][[j]]$P.Value < 0.05] <- "UP"
+  # if log2Foldchange < -0.2 and pvalue < 0.05, set as "DOWN"
+  genelistNCvsC_dreamlet_cellcounts[[i]][[j]]$diffexpressed[genelistNCvsC_dreamlet_cellcounts[[i]][[j]]$logFC < 0 & genelistNCvsC_dreamlet_cellcounts[[i]][[j]]$P.Value < 0.05] <- "DOWN"
+  genelistNCvsC_dreamlet_cellcounts[[i]][[j]]$CNVgene <- 'FALSE'
+  genelistNCvsC_dreamlet_cellcounts[[i]][[j]]$CNVgene[rownames(genelistNCvsC_dreamlet_cellcounts[[i]][[j]]) %in% dreamlet_CNVgenes[[j]]$Gene.name] <- 'TRUE'
+}
+}
+
+for(i in names(genelistNCvsC_dreamlet_cellcounts)){for(j in names(genelistNCvsC_dreamlet_cellcounts[[i]])){
+  genelistNCvsC_dreamlet_cellcounts[[i]][[j]]$fdr_0.5 <- 'FALSE'
+  genelistNCvsC_dreamlet_cellcounts[[i]][[j]]$fdr_0.5[genelistNCvsC_dreamlet_cellcounts[[i]][[j]]$adj.P.Val <0.5] <- 'TRUE'
+  genelistNCvsC_dreamlet_cellcounts[[i]][[j]]$fdr_0.1 <- 'FALSE'
+  genelistNCvsC_dreamlet_cellcounts[[i]][[j]]$fdr_0.1[genelistNCvsC_dreamlet_cellcounts[[i]][[j]]$adj.P.Val <0.1] <- 'TRUE'
+  genelistNCvsC_dreamlet_cellcounts[[i]][[j]]$fdr_0.2 <- 'FALSE'
+  genelistNCvsC_dreamlet_cellcounts[[i]][[j]]$fdr_0.2[genelistNCvsC_dreamlet_cellcounts[[i]][[j]]$adj.P.Val <0.2] <- 'TRUE'
+}}
+
+DEG_dream <- list()
+DEG_count<- list()
+for (i in names(genelistNCvsC_dreamlet_cellcounts)){for(j in names(genelistNCvsC_dreamlet_cellcounts[[i]])){
+  print(i)
+  print(j)
+  DEG_dream[[i]][[j]] <- subset(genelistNCvsC_dreamlet_cellcounts[[i]][[j]],diffexpressed != "NO")
+  DEG_dream[[i]][[j]]$Key <- paste(DEG_dream[[i]][[j]]$diffexpressed,DEG_dream[[i]][[j]]$fdr_0.1, sep = "_")
+  DEG_dream[[i]][[j]] <- DEG_dream[[i]][[j]] %>%
+    dplyr::group_by(Key)%>%
+    dplyr::count()
+  DEG_dream[[i]][[j]]$celltype <- i
+  DEG_dream[[i]][[j]]$group <-j
+}
+  DEG_count[[i]] <- do.call(rbind, Map(data.frame, DEG_dream[[i]]))
+}
+
+DEG_dream_merge <- do.call(rbind, Map(data.frame,DEG_count))
+
+
+library(plyr)
+DEG_dream_merge$Key <- revalue(DEG_dream_merge$Key, c("DOWN_FALSE"="Downregulated", "DOWN_TRUE"="Downregulated (FDR <0.1)","UP_FALSE" ="Upregulated","UP_TRUE"="Upregulated (FDR<0.1)"))
+library(ggplot2)
+png("cellcount_dreamlet_barplot_FDR.png", width = 2200, height = 1300, res = 240)
+ggplot2::ggplot(data = DEG_dream_merge, aes(celltype, n, fill = Key)) +
+  geom_bar(position = "stack", stat="identity")+
+  scale_fill_manual(values=c("dodgerblue","dodgerblue4","firebrick1","firebrick3"))+
+  labs(title = "Dreamlet Results by CNV", subtitle = "~CNV+cellcount+(1|Region)+(1|MG)+(1|HBCC_BrNum)",
+       y = "Count of DEGs") + 
+  coord_flip()+
+  facet_wrap(~ group,ncol=4)+
+  theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust=0.5))
+dev.off()
+
+
+res_zenith<- list()
+for(i in coefNames(res.dl_defaults_cellcount)[2:11]){
+  res_zenith[[i]] = zenith_gsa(res.dl_defaults_cellcount, coef = paste(i), go.gs)
+}
+
+df <- list()
+for(i in names(res_zenith)){
+  # get genesets with FDR < 5%
+  gs = unique(res_zenith[[i]]$Geneset[res_zenith[[i]]$FDR < 0.1])
+  # keep only results of these genesets 
+  df[[i]] = res_zenith[[i]][res_zenith[[i]]$Geneset %in% gs,]
+  # plot results, but with no limit based on the highest/lowest t-statistic
+}
+
+for(i in names(df)){
+# plot results, but with no limit based on the highest/lowest t-statistic
+  png(paste(i,"zenith_results_FDR_01_MSB.png"), width = 800, height = 1000, res = 100)
+  plot1 <- plotZenithResults(df[[i]], 5, 1)
+  grid.arrange(plot1)
+  dev.off()
+}
+
+
+##############################################################
+#Add in nfeature as covariate
+##############################################################
+nfeatures <- read.csv("~/nfeature_sample.csv")
+
+pb_adult_dreamlet <-readRDS("/gpfs/gsfs12/users/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/pb_adult_dreamlet")
+pb_adult_dreamlet$nfeature <- nfeatures$mean.nfeature[match(colnames(pb_adult_dreamlet),nfeatures$orig.ident)]
+pb_adult_dreamlet$CNV <-  relevel(factor(pb_adult_dreamlet$CNV), ref= "non-carrier")
+form <- ~CNV + nfeature +(1|Region) + (1 | HBCC_BrNum) + (1 | Match_group)
+
+# Normalize and apply voom/voomWithDreamWeights
+res.proc_defaults_nfeature = processAssays(pb_adult_dreamlet, form, min.cells=0)
+saveRDS(res.proc_defaults_nfeature,"/data/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/~CNV+nfeature+(1|MG)+(1|HBCC_BrNum)/res.proc_defaults_nfeature")
+res.proc_defaults_nfeature$Astrocyte 
+res.dl_defaults_nfeature <- dreamlet(res.proc_defaults_nfeature, form)
+saveRDS(res.dl_defaults_nfeature,"/data/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/~CNV+nfeature+(1|MG)+(1|HBCC_BrNum)/res.dl_defaults_nfeature")
+
+coefNames(res.dl_defaults_nfeature)[2:11]
+# results from full analysis
+genelistNCvsC_dreamlet_nfeatures<- list()
+for(i in names(res.dl_defaults_nfeature)){for(j in coefNames(res.dl_defaults_nfeature)[2:11]){
+  print(i)
+  genelistNCvsC_dreamlet_nfeatures[[i]][[j]] <- topTable(res.dl_defaults_nfeature[[paste(i)]], coef = j, number = Inf)
+}}
+
+Genes_inCNVregions <- readRDS("~/Genes_inCNVregions")
+dreamlet_CNVgenes <- list(Genes_inCNVregions$HBCC_6_15q11del,Genes_inCNVregions$HBCC_6_15q11del,Genes_inCNVregions$HBCC_2del,Genes_inCNVregions$HBCC_8dup,Genes_inCNVregions$HBCC_1_1q21del,Genes_inCNVregions$HBCC_2_1q21dup,Genes_inCNVregions$SMRI_2_22q11del,Genes_inCNVregions$SMRI_3_22q11dup,Genes_inCNVregions$UMB_2_7q11del)
+names(dreamlet_CNVgenes) <- names(genelistNCvsC_dreamlet_nfeatures$Astrocyte)
+
+for (i in names(genelistNCvsC_dreamlet_nfeatures)){for (j in names(genelistNCvsC_dreamlet_nfeatures[[i]])){
+  genelistNCvsC_dreamlet_nfeatures[[i]][[paste(j)]]$diffexpressed <- "NO"
+  # if log2Foldchange > 0.2 and pvalue < 0.05, set as "UP" 
+  genelistNCvsC_dreamlet_nfeatures[[i]][[j]]$diffexpressed[genelistNCvsC_dreamlet_nfeatures[[i]][[j]]$logFC > 0 & genelistNCvsC_dreamlet_nfeatures[[i]][[j]]$P.Value < 0.05] <- "UP"
+  # if log2Foldchange < -0.2 and pvalue < 0.05, set as "DOWN"
+  genelistNCvsC_dreamlet_nfeatures[[i]][[j]]$diffexpressed[genelistNCvsC_dreamlet_nfeatures[[i]][[j]]$logFC < 0 & genelistNCvsC_dreamlet_nfeatures[[i]][[j]]$P.Value < 0.05] <- "DOWN"
+  genelistNCvsC_dreamlet_nfeatures[[i]][[j]]$CNVgene <- 'FALSE'
+  genelistNCvsC_dreamlet_nfeatures[[i]][[j]]$CNVgene[rownames(genelistNCvsC_dreamlet_nfeatures[[i]][[j]]) %in% dreamlet_CNVgenes[[j]]$Gene.name] <- 'TRUE'
+}}
+
+for (i in names(genelistNCvsC_dreamlet_nfeatures)){for (j in names(genelistNCvsC_dreamlet_nfeatures[[i]])){
+  genelistNCvsC_dreamlet_nfeatures[[i]][[paste(j)]]$diffexpressed <- "NO"
+  # if log2Foldchange > 0.2 and pvalue < 0.05, set as "UP" 
+  genelistNCvsC_dreamlet_nfeatures[[i]][[j]]$diffexpressed[genelistNCvsC_dreamlet_nfeatures[[i]][[j]]$logFC > 0 & genelistNCvsC_dreamlet_nfeatures[[i]][[j]]$P.Value < 0.05] <- "UP"
+  # if log2Foldchange < -0.2 and pvalue < 0.05, set as "DOWN"
+  genelistNCvsC_dreamlet_nfeatures[[i]][[j]]$diffexpressed[genelistNCvsC_dreamlet_nfeatures[[i]][[j]]$logFC < 0 & genelistNCvsC_dreamlet_nfeatures[[i]][[j]]$P.Value < 0.05] <- "DOWN"
+  genelistNCvsC_dreamlet_nfeatures[[i]][[j]]$CNVgene <- 'FALSE'
+  genelistNCvsC_dreamlet_nfeatures[[i]][[j]]$CNVgene[rownames(genelistNCvsC_dreamlet_nfeatures[[i]][[j]]) %in% dreamlet_CNVgenes[[j]]$Gene.name] <- 'TRUE'
+}
+}
+
+for(i in names(genelistNCvsC_dreamlet_nfeatures)){for(j in names(genelistNCvsC_dreamlet_nfeatures[[i]])){
+  genelistNCvsC_dreamlet_nfeatures[[i]][[j]]$fdr_0.5 <- 'FALSE'
+  genelistNCvsC_dreamlet_nfeatures[[i]][[j]]$fdr_0.5[genelistNCvsC_dreamlet_nfeatures[[i]][[j]]$adj.P.Val <0.5] <- 'TRUE'
+  genelistNCvsC_dreamlet_nfeatures[[i]][[j]]$fdr_0.1 <- 'FALSE'
+  genelistNCvsC_dreamlet_nfeatures[[i]][[j]]$fdr_0.1[genelistNCvsC_dreamlet_nfeatures[[i]][[j]]$adj.P.Val <0.1] <- 'TRUE'
+  genelistNCvsC_dreamlet_nfeatures[[i]][[j]]$fdr_0.2 <- 'FALSE'
+  genelistNCvsC_dreamlet_nfeatures[[i]][[j]]$fdr_0.2[genelistNCvsC_dreamlet_nfeatures[[i]][[j]]$adj.P.Val <0.2] <- 'TRUE'
+}}
+
+DEG_dream <- list()
+DEG_count<- list()
+for (i in names(genelistNCvsC_dreamlet_nfeatures)){for(j in names(genelistNCvsC_dreamlet_nfeatures[[i]])){
+  print(i)
+  print(j)
+  DEG_dream[[i]][[j]] <- subset(genelistNCvsC_dreamlet_nfeatures[[i]][[j]],diffexpressed != "NO")
+  DEG_dream[[i]][[j]]$Key <- paste(DEG_dream[[i]][[j]]$diffexpressed,DEG_dream[[i]][[j]]$fdr_0.1, sep = "_")
+  DEG_dream[[i]][[j]] <- DEG_dream[[i]][[j]] %>%
+    dplyr::group_by(Key)%>%
+    dplyr::count()
+  DEG_dream[[i]][[j]]$celltype <- i
+  DEG_dream[[i]][[j]]$group <-j
+}
+  DEG_count[[i]] <- do.call(rbind, Map(data.frame, DEG_dream[[i]]))
+}
+
+DEG_dream_merge <- do.call(rbind, Map(data.frame,DEG_count))
+
+
+library(plyr)
+DEG_dream_merge$Key <- revalue(DEG_dream_merge$Key, c("DOWN_FALSE"="Downregulated", "DOWN_TRUE"="Downregulated (FDR <0.1)","UP_FALSE" ="Upregulated","UP_TRUE"="Upregulated (FDR<0.1)"))
+library(ggplot2)
+png("nfeature_dreamlet_barplot_FDR_allcoef.png", width = 950, height = 600, res = 100)
+ggplot2::ggplot(data = DEG_dream_merge, aes(celltype, n, fill = Key)) +
+  geom_bar(position = "stack", stat="identity")+
+  scale_fill_manual(values=c("dodgerblue","dodgerblue4","firebrick1","firebrick3"))+
+  labs(title = "Dreamlet Results by CNV", subtitle = "~CNV+nfeature+(1|Region)+(1|MG)+(1|HBCC_BrNum)",
+       y = "Count of DEGs") + 
+  coord_flip()+
+  facet_wrap(~ group,ncol=4)+
+  theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust=0.5))
+dev.off()
+
+res_zenith<- list()
+for(i in coefNames(res.dl_defaults_nfeature)[2:11]){
+  res_zenith[[i]] = zenith_gsa(res.dl_defaults_nfeature, coef = paste(i), go.gs)
+}
+
+df <- list()
+for(i in names(res_zenith)){
+  # get genesets with FDR < 5%
+  gs = unique(res_zenith[[i]]$Geneset[res_zenith[[i]]$FDR < 0.1])
+  # keep only results of these genesets 
+  df[[i]] = res_zenith[[i]][res_zenith[[i]]$Geneset %in% gs,]
+  # plot results, but with no limit based on the highest/lowest t-statistic
+}
+
+for(i in names(df)){
+  # plot results, but with no limit based on the highest/lowest t-statistic
+  png(paste(i,"zenith_results_FDR_01_MSB.png"), width = 800, height = 1000, res = 100)
+  plot1 <- plotZenithResults(df[[i]], 5, 1)
+  grid.arrange(plot1)
+  dev.off()
+}
+
+###############################
+#Remove ribosomal genes and rerun dreamlet with and without nfeature
+###############################
+pb_adult_dreamlet_remvd_genes <- pb_adult_dreamlet[-grep("RPL",rownames(pb_adult_dreamlet)),]
+pb_adult_dreamlet_remvd_genes <- pb_adult_dreamlet_remvd_genes[-grep("MT-",rownames(pb_adult_dreamlet_remvd_genes)),]
+pb_adult_dreamlet_remvd_genes <- pb_adult_dreamlet_remvd_genes[-grep("RPS",rownames(pb_adult_dreamlet_remvd_genes)),]
+pb_adult_dreamlet_remvd_genes$HBCC_BrNum <- as.character(pb_adult_dreamlet_remvd_genes$HBCC_BrNum)
+str(pb_adult_dreamlet_remvd_genes)
+pb_adult_dreamlet_remvd_genes<- readRDS("/data/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/Removed_MT_RiboGenes/pb_adult_dreamlet_remvd_genes")
+form <- ~CNV +(1|Region) + (1 | HBCC_BrNum) + (1 | Match_group)
+res.proc_defaults_remvdgenes = processAssays(pb_adult_dreamlet_remvd_genes, form, min.cells=0)
+saveRDS(res.proc_defaults_remvdgenes,"/gpfs/gsfs12/users/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercfentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/Removed_MT_RiboGenes/~CNV+(1|Region)+(1|Match_group)+(1|HBCC_BrNum)/ReRun_BrNumCharacter/res.proc_defaults_remvdgenes_JAN2024")
+data.frame.counts.remvdgenes <- list()
+for(i in names(res.proc_defaults_remvdgenes)){
+  data.frame.counts.remvdgenes[[i]]$Number.of.Genes <- nrow(res.proc_defaults_remvdgenes[[i]])
+  data.frame.counts.remvdgenes[[i]]$Cell.Type <- i
+  data.frame.counts.remvdgenes[[i]]$Filtering <- "Dreamlet Default Settings"
+}
+counts.pseudotime <- do.call(rbind, Map(data.frame, data.frame.counts.remvdgenes))
+library(plyr)
+counts.pseudotime$Cell.Type <- revalue(counts.pseudotime$Cell.Type, c("Inhibitory_CGE"="CGE-Derived Inhibitory Neurons", "Inhibitory_MGE"="MGE-Derived Inhibitory Neurons","L2_3Excitatory" ="Lower Excitatory Neurons","L5_6Excitatory"="Upper Excitatory Neurons"))
+dput(levels(as.factor(DEG_dream_merge$Cell.Type)))
+counts.pseudotime$Cell.Type <- factor(counts.pseudotime$Cell.Type,levels = c("VLMC_Endo", "OPC", "Oligodendrocytes", "Microglia", "Astrocyte", "Upper Excitatory Neurons", "Lower Excitatory Neurons", "MGE-Derived Inhibitory Neurons", "CGE-Derived Inhibitory Neurons"))
+library(ggplot2)
+png("barplot_defaultfiltering.png", res = 90, width = 900)
+plot1 <- ggplot(counts.pseudotime,aes(x=Number.of.Genes, y = Cell.Type, fill=Cell.Type))+
+  geom_bar(stat="identity", position=position_dodge())+
+  labs(title ="Dreamlet Number of Genes By Cell Type",subtitle = "Default Settings") + 
+  theme_cowplot()+
+  theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust=0.5))+
+  geom_text(aes(label=Number.of.Genes, color = Cell.Type), position=position_dodge(width=0.9), vjust=0.5, hjust = 0)+
+  xlim(0,25000)+
+  scale_linetype_manual(guide = guide_legend(reverse = TRUE) )
+grid.arrange(plot1)
+dev.off()
+
+colData(res.proc_defaults_remvdgenes)$`Cell Number Estimate` <- snCNV_adult_metadata$Estimated.Number.of.Cells[match(rownames(colData(res.proc_defaults_remvdgenes)),snCNV_adult_metadata$orig.ident)]
+colData(res.proc_defaults_remvdgenes)$PMI<- snCNV_adult_metadata$PMI[match(rownames(colData(res.proc_defaults_remvdgenes)),snCNV_adult_metadata$orig.ident)]
+colData(res.proc_defaults_remvdgenes)$BrainNumber<- snCNV_adult_metadata$HBCC_BrNum[match(rownames(colData(res.proc_defaults_remvdgenes)),snCNV_adult_metadata$orig.ident)]
+colData(res.proc_defaults_remvdgenes)$BrainNumber <- as.character(colData(res.proc_defaults_remvdgenes)$BrainNumber)
+colData(res.proc_defaults_remvdgenes)$MatchGroup<- snCNV_adult_metadata$Match_group[match(rownames(colData(res.proc_defaults_remvdgenes)),snCNV_adult_metadata$orig.ident)]
+colData(res.proc_defaults_remvdgenes)$bulkRIN<- snCNV_adult_metadata$bulk_RIN[match(rownames(colData(res.proc_defaults_remvdgenes)),snCNV_adult_metadata$orig.ident)]
+colData(res.proc_defaults_remvdgenes)$nFeature<- snCNV_adult_metadata$nFeature_RNA[match(rownames(colData(res.proc_defaults_remvdgenes)),snCNV_adult_metadata$orig.ident)]
+
+for(i in names(metadata_simple)){
+  snCNV_adult_metadata$esimated_nu_brainnu <- paste(snCNV_adult_metadata$Estimated.Number.of.Cells,snCNV_adult_metadata$HBCC_BrNum)
+  metadata_simple[[i]]$esimated_nu_brainnu <- paste(metadata_simple[[i]]$`Cell Number Estimate`,metadata_simple[[i]]$BrainNumber)
+  metadata_simple[[i]]$orig.ident <- snCNV_adult_metadata$orig.ident[match(metadata_simple[[i]]$esimated_nu_brainnu,snCNV_adult_metadata$esimated_nu_brainnu)]
+}
+
+for(i in names(res.proc_defaults_remvdgenes)){
+   colData(res.proc_defaults_remvdgenes[names(res.proc_defaults_remvdgenes) == i])$`Cell count within cell type` <- metadata_simple[[i]]$`Cell count within cell type`[match(rownames(colData(res.proc_defaults_remvdgenes[names(res.proc_defaults_remvdgenes) == i])), metadata_simple[[i]]$orig.ident)]
+}
+
+# run variance partitioning analysis
+library(variancePartition)
+names(colData(res.proc_defaults_remvdgenes))
+
+form <- ~(1|CNV)+(1|Region)+(1|BrainNumber)+(1|MatchGroup)+PMI+pH+bulkRIN+`Cell Number Estimate`+nFeature
+vp.lst_remvdgenes = fitVarPart(res.proc_defaults_remvdgenes, form,BPPARAM = SnowParam(6))
+vp.lst_remvdgenes <- readRDS("/data/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/Removed_MT_RiboGenes/~CNV+(1|Region)+(1|Match_group)+(1|HBCC_BrNum)/vp.lst_remvdgenes_quantitative_random")
+
+vp.lst_added<- readRDS("/data/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/vp.lst_added")
+
+colnames(vp.lst_remvdgenes)
+colnames(vp.lst_remvdgenes)[colnames(vp.lst_remvdgenes)=='X.Cell.Number.Estimate.'] = 'Estimated Num of Cells'
+vp.lst_remvdgenes<- vp.lst_remvdgenes[colnames(vp.lst_remvdgenes)!='pH'] 
+
+# Summarize variance fractions genome-wide for each cell type
+png("vpjune23.png",res = 67)
+plotVarPart(vp.lst_remvdgenes, label.angle = 60) 
+dev.off()
+
+#define useful functions
+mypca <- function(object, col = "black", labels = colnames(object), main = NULL, cex=1) 
+{
+  pca <- prcomp(t(object))
+  percentVar <- pca$sdev^2/sum(pca$sdev^2)
+  plot(pca$x[, 1], pca$x[, 2], col = as.character(col), main = main, pch="",
+       xlab = paste0("PC1: ", round(percentVar[1] * 100, digits = 1), "% variance"),
+       ylab = paste0("PC2: ", round(percentVar[2] * 100, digits = 1), "% variance"))
+  text(pca$x[, 1], pca$x[, 2], labels=labels, col = as.character(col), cex = cex)
+  pca$percentVar=percentVar
+  return(pca)
+}
+
+get_voom=function(counts, genes, design=NULL){
+  require(edgeR)
+  d=DGEList(counts = counts, genes = genes)
+  d=calcNormFactors(d)
+  voom(d,plot=T, design = design)
+}
+
+getFit=function(voom, design){
+  require(edgeR)
+  lfit=lmFit(voom, design = design)
+  eBayes(lfit)
+}
+snCNV_adult_metadata <- read.csv("~/Feb23_CNV_sn_bulk_metadata.csv")
+cell.counts <- read.csv("~/March23_Adult_CNV_subclass_count.csv")
+cell.counts$orig.ident_subclass.annotation<- paste(cell.counts$snCNV_spx_nd_adult_MG_fc_MG_fc_MG.orig.ident, cell.counts$snCNV_spx_nd_adult_MG_fc_MG_fc_MG.subclass.annotation, sep = "_")
+
+mean.genes.sample.celltype.mg<- readRDS("/data/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/mean.genes.sample.celltype.mg")
+median.genes.sample.celltype.mg<- readRDS("/data/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/median.genes.sample.celltype.mg")
+##run Voom & PCA on logCPM
+pval_covariates <- list()
+metadata_simple <- list()
+pca_snCNV_dreamlet <- list()
+for(i in names(res.proc_defaults_remvdgenes)){
+  pca_snCNV_dreamlet[[i]] = mypca(object = res.proc_defaults_remvdgenes[[i]]$E)
+  sample_id <- colnames(res.proc_defaults_remvdgenes[[i]])
+  metadata <- data.frame(sample_id, paste(i))
+  names(metadata) <- c("sample_id","celltype")
+  metadata$orig.ident_subclass.annotation <- paste(metadata$sample_id,metadata$celltype,sep = "_")
+  metadata$Region <- snCNV_adult_metadata$Region[match(metadata$sample_id , snCNV_adult_metadata$orig.ident)]
+  metadata$Carrier_Status <- snCNV_adult_metadata$Carrier_Status[match(metadata$sample_id , snCNV_adult_metadata$orig.ident)]
+  metadata$Sex <- snCNV_adult_metadata$Sex[match(metadata$sample_id , snCNV_adult_metadata$orig.ident)]
+  metadata$Match_group <- snCNV_adult_metadata$Match_group[match(metadata$sample_id , snCNV_adult_metadata$orig.ident)]
+  metadata$pH <- snCNV_adult_metadata$pH[match(metadata$sample_id , snCNV_adult_metadata$orig.ident)]
+  metadata$PMI <- snCNV_adult_metadata$PMI[match(metadata$sample_id , snCNV_adult_metadata$orig.ident)]
+  metadata$CNV <- snCNV_adult_metadata$CNV[match(metadata$sample_id , snCNV_adult_metadata$orig.ident)]
+  metadata$Dx <- snCNV_adult_metadata$Dx[match(metadata$sample_id , snCNV_adult_metadata$orig.ident)]
+  metadata$Age <- snCNV_adult_metadata$Age[match(metadata$sample_id , snCNV_adult_metadata$orig.ident)]
+  metadata$Reads.Mapped.Confidently.to.Genome <- snCNV_adult_metadata$Reads.Mapped.Confidently.to.Genome[match(metadata$sample_id , snCNV_adult_metadata$orig.ident)]
+  metadata$Reads.Mapped.Confidently.to.Intergenic.Regions <- snCNV_adult_metadata$Reads.Mapped.Confidently.to.Intergenic.Regions[match(metadata$sample_id , snCNV_adult_metadata$orig.ident)]
+  metadata$Reads.Mapped.Confidently.to.Exonic.Regions <- snCNV_adult_metadata$Reads.Mapped.Confidently.to.Exonic.Regions[match(metadata$sample_id , snCNV_adult_metadata$orig.ident)]
+  metadata$Reads.Mapped.Confidently.to.Intronic.Regions <- snCNV_adult_metadata$Reads.Mapped.Confidently.to.Intronic.Regions[match(metadata$sample_id , snCNV_adult_metadata$orig.ident)]
+  metadata$bulk_RIN <- snCNV_adult_metadata$bulk_RIN[match(metadata$sample_id , snCNV_adult_metadata$orig.ident)]
+  metadata$Sequencing.Saturation <- snCNV_adult_metadata$Sequencing.Saturation[match(metadata$sample_id , snCNV_adult_metadata$orig.ident)]
+  metadata$Estimated.Number.of.Cells <- snCNV_adult_metadata$Estimated.Number.of.Cells[match(metadata$sample_id , snCNV_adult_metadata$orig.ident)]
+  metadata$subtype.counts <-  cell.counts$n[match(metadata$orig.ident_subclass.annotation,cell.counts$orig.ident_subclass.annotation)]
+  metadata$Reads.Mapped.Confidently.to.Transcriptome <- snCNV_adult_metadata$Reads.Mapped.Confidently.to.Transcriptome[match(metadata$sample_id , snCNV_adult_metadata$orig.ident)]
+  metadata$Median.Genes.per.Cell.bycelltype <- median.genes.sample.celltype.mg$median.genes.use.bysample..i....j....k...[match(metadata$orig.ident_subclass.annotation , median.genes.sample.celltype.mg$orig.ident_subclass.annotation)]
+  metadata$Mean.Genes.per.Cell.bycelltype <- mean.genes.sample.celltype.mg$mean.genes.use.bysample..i....j....k...[match(metadata$orig.ident_subclass.annotation , mean.genes.sample.celltype.mg$orig.ident_subclass.annotation)]
+  metadata$HBCC_BrNum <- snCNV_adult_metadata$HBCC_BrNum[match(metadata$sample_id , snCNV_adult_metadata$orig.ident)]
+  metadata_simple[[i]] <- metadata[,c("HBCC_BrNum","Match_group","Region","CNV","Age","pH","PMI","bulk_RIN","Estimated.Number.of.Cells","Sequencing.Saturation","Reads.Mapped.Confidently.to.Genome","Reads.Mapped.Confidently.to.Intergenic.Regions","Reads.Mapped.Confidently.to.Intronic.Regions","Reads.Mapped.Confidently.to.Exonic.Regions","Reads.Mapped.Confidently.to.Transcriptome","subtype.counts","Median.Genes.per.Cell.bycelltype","Mean.Genes.per.Cell.bycelltype")]
+  names(metadata_simple[[i]]) <- c("BrainNumber","MatchGroup","Region","CNV","Age","pH","PMI","bulkRIN","Cell Number Estimate","Sequencing Saturation","Reads Mapped to Genome","Reads Mapped to Intergenic Regions","Reads Mapped to Intronic Regions","Reads Mapped to Exonic Regions","Reads Mapped to Transcriptome","Cell count within cell type","Median Genes per Cell","Mean Genes per Cell")
+  n <- length(metadata_simple[[i]]$BrainNumber)
+  pval_covariates[[i]]=matrix(ncol=n, nrow=ncol(metadata_simple[[i]]))
+  rownames(pval_covariates[[i]])=colnames(metadata_simple[[i]])
+  colnames(pval_covariates[[i]])=paste0("PC",1:n)
+}
+
+for (i in names(pca_snCNV_dreamlet)) {for (PC in 1:ncol(pval_covariates[[i]])) {for (k in names(metadata_simple[[i]])){
+  a=summary(lm(pca_snCNV_dreamlet[[i]]$x[,PC]~metadata_simple[[i]][[k]]))
+  pval_covariates[[i]][k,PC]=pf(a$fstatistic[1],a$fstatistic[2],a$fstatistic[3],lower.tail=FALSE)[1]
+}}}
+names(pval_covariates) <- c("Astrocyte", "CGE-Derived Inhibitory Neurons", "MGE-Derived Inhibitory Neurons", "Lower Excitatory Neurons", "Upper Excitatory Neurons", "Microglia", "Oligodendrocytes", "OPC", "VLMC_Endo")
+names(metadata_simple$Astrocyte)
+library(ComplexHeatmap)
+heatmap_celltypes<- list()
+for (i in names(pval_covariates)) {
+  heatmap_celltypes[[i]]<- Heatmap(log10(pval_covariates[[i]][,1:10]), col=circlize::colorRamp2(seq(0,-8, length = 9), RColorBrewer::brewer.pal(9, "Blues")), rect_gp = gpar(col = 1, lwd = 1),
+                                   heatmap_legend_param = list(color_bar="continuous", title="log10(p_val)"), column_title = paste(i, sep= ' '),
+                                   cluster_rows = F, cluster_columns = F, column_title_gp = gpar(fontsize = 10), show_heatmap_legend = F, show_row_dend = TRUE)
+}
+
+png("heatmap_neurons.png", width = 2000, res = 110)
+heatmap_list_neurons <- heatmap_celltypes$`CGE-Derived Inhibitory Neurons` +heatmap_celltypes$`MGE-Derived Inhibitory Neurons`+ heatmap_celltypes$`Lower Excitatory Neurons` + heatmap_celltypes$`Upper Excitatory Neurons`
+draw(heatmap_list_neurons, padding = unit(c(2, 2, 2, 20), "mm"))
+dev.off()
+
+png("heatmap_glia.png", width = 2500, res = 110)
+heatmap_list_glia <- heatmap_celltypes$Astrocyte +heatmap_celltypes$Microglia+ heatmap_celltypes$Oligodendrocytes + heatmap_celltypes$OPC + heatmap_celltypes$VLMC_Endo
+draw(heatmap_list_glia, padding = unit(c(2, 2, 2, 20), "mm"))
+dev.off()
+
+pval_pc_lme<- list()
+for(i in names(metadata_simple)){
+  pval_pc_lme[[i]]=matrix(ncol=10, nrow=18)
+  rownames(pval_pc_lme[[i]])=colnames(metadata_simple[[i]])
+  colnames(pval_pc_lme[[i]])=paste0("PC",1:10)
+  pval_pc_lme[[i]] <- as.matrix(pval_pc_lme[[i]])
+}
+
+library(lme4)
+for(i in names(pca_snCNV_dreamlet)){for (PC in 1:10) {for (k in colnames(metadata_simple[[i]])){
+  a=lmer(data = data.frame(pc=pca_snCNV_dreamlet[[i]]$x[,PC], val= metadata_simple[[i]][[k]], metadata_simple[[i]][,c("BrainNumber","MatchGroup")]), pc~val +(1|BrainNumber) + (1|MatchGroup))
+  pval_pc_lme[[i]][k,PC]=as.numeric(anova(a)[4])
+}}}
+
+
+names(pval_pc_lme) <- c("Astrocyte", "CGE-Derived Inhibitory Neurons", "MGE-Derived Inhibitory Neurons", "Lower Excitatory Neurons", "Upper Excitatory Neurons", "Microglia", "Oligodendrocytes", "OPC", "VLMC_Endo")
+heatmap_celltypes<- list()
+for (i in names(pval_pc_lme)) {
+  heatmap_celltypes[[i]]<- Heatmap(log10(pval_pc_lme[[i]][,1:10]), col=circlize::colorRamp2(seq(0,-8, length = 9), RColorBrewer::brewer.pal(9, "Blues")), rect_gp = gpar(col = 1, lwd = 1),
+                                   heatmap_legend_param = list(color_bar="continuous", title="log10(p_val)"), column_title = paste(i, sep= ' '),
+                                   cluster_rows = F, cluster_columns = F, column_title_gp = gpar(fontsize = 10), show_heatmap_legend = F, show_row_dend = TRUE)
+}
+
+png("heatmap_neurons_MG_BrNu.png", width = 2000, res = 110)
+heatmap_list_neurons <- heatmap_celltypes$`CGE-Derived Inhibitory Neurons` +heatmap_celltypes$`MGE-Derived Inhibitory Neurons`+ heatmap_celltypes$`Lower Excitatory Neurons` + heatmap_celltypes$`Upper Excitatory Neurons`
+draw(heatmap_list_neurons, padding = unit(c(2, 2, 2, 20), "mm"))
+dev.off()
+
+png("heatmap_glia_MG_BrNu.png", width = 2500, res = 110)
+heatmap_list_glia <- heatmap_celltypes$Astrocyte +heatmap_celltypes$Microglia+ heatmap_celltypes$Oligodendrocytes + heatmap_celltypes$OPC + heatmap_celltypes$VLMC_Endo
+draw(heatmap_list_glia, padding = unit(c(2, 2, 2, 20), "mm"))
+dev.off()
+
+excl_var = function(x, var2ex = c("Region","CNV")){
+  x=x[!x %in% var2ex]
+  return(x)
+}
+
+pval_pc_chk<- list()
+for(i in names(pca_snCNV_dreamlet)){
+  x <- excl_var(colnames(metadata_simple[[i]]))
+  pval_pc_chk[[i]]=matrix(ncol=10, nrow=length(x))
+  rownames(pval_pc_chk[[i]])=excl_var(colnames(metadata_simple[[i]]))
+  colnames(pval_pc_chk[[i]])=paste0("PC",1:10)
+}
+
+
+for(i in names(pca_snCNV_dreamlet)){for (PC in 1:10) {for (k in rownames(pval_pc_chk[[i]])){
+  a=residuals(lme4::lmer(data = data.frame(pc=pca_snCNV_dreamlet[[i]]$x[,PC], metadata_simple[[i]]), pc~CNV+(1|BrainNumber)+(1|Region)+ (1|MatchGroup)))
+  a=summary(lm(a~metadata_simple[[i]][[k]]))
+  pval_pc_chk[[i]][k,PC]=pf(a$fstatistic[1],a$fstatistic[2],a$fstatistic[3],lower.tail=FALSE)[1]
+}}}
+names(pval_pc_chk) <- c("Astrocyte", "CGE-Derived Inhibitory Neurons", "MGE-Derived Inhibitory Neurons", "Lower Excitatory Neurons", "Upper Excitatory Neurons", "Microglia", "Oligodendrocytes", "OPC", "VLMC_Endo")
+sig_cov<- list()
+sig_cov_merge<- list()
+for(i in names(pval_pc_chk)){
+  sig_cov[[i]] <- pval_pc_chk[[i]][,1][pval_pc_chk[[i]][,1]<0.05]
+  sig_cov_merge[[i]] <- data.frame(Reduce(rbind,sig_cov[[i]]))
+  rownames(sig_cov_merge[[i]]) <- names(sig_cov[[i]])
+  colnames(sig_cov_merge[[i]]) <-"Linear.Reg.P.Val"
+  sig_cov_merge[[i]]$Celltype <- i
+  sig_cov_merge[[i]]$Cov <- rownames(sig_cov_merge[[i]])
+}
+
+sig_cov_merge_2 <- data.frame(Reduce(rbind,sig_cov_merge))
+library(tidyr)
+table(sig_cov_merge_2$Cov)
+
+library(ComplexHeatmap)
+heatmap_celltypes<- list()
+for (i in names(pval_pc_chk)) {
+  heatmap_celltypes[[i]]<- Heatmap(log10(pval_pc_chk[[i]][,1:10]), col=circlize::colorRamp2(seq(0,-8, length = 9), RColorBrewer::brewer.pal(9, "Blues")), rect_gp = gpar(col = 1, lwd = 1),
+                                                    heatmap_legend_param = list(color_bar="continuous", title="log10(p_val)"), column_title = paste(i,sep= ' '),
+                                                    cluster_rows = F, cluster_columns = F, column_title_gp = gpar(fontsize = 10),show_heatmap_legend = F)
+}
+
+png("heatmap_neurons_MG_BrNu_CNV_Region.png", width = 2000, res = 110)
+heatmap_list_neurons <- heatmap_celltypes$`CGE-Derived Inhibitory Neurons` +heatmap_celltypes$`MGE-Derived Inhibitory Neurons`+ heatmap_celltypes$`Lower Excitatory Neurons` + heatmap_celltypes$`Upper Excitatory Neurons`
+draw(heatmap_list_neurons, padding = unit(c(2, 2, 2, 20), "mm"))
+dev.off()
+
+png("heatmap_glia_MG_BrNu_CNV_Region.png", width = 2500, res = 110)
+heatmap_list_glia <- heatmap_celltypes$Astrocyte +heatmap_celltypes$Microglia+ heatmap_celltypes$Oligodendrocytes + heatmap_celltypes$OPC + heatmap_celltypes$VLMC_Endo
+draw(heatmap_list_glia, padding = unit(c(2, 2, 2, 20), "mm"))
+dev.off()
+
+res.dl_defaults_remvdgenes <- dreamlet(res.proc_defaults_remvdgenes, form)
+res.dl_defaults_remvdgenes <- readRDS("/gpfs/gsfs12/users/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/Removed_MT_RiboGenes/~CNV+(1|Region)+(1|Match_group)+(1|HBCC_BrNum)/res.dl_defaults_remvdgenes")
+res.proc_defaults_remvdgenes <- readRDS("/gpfs/gsfs12/users/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/Removed_MT_RiboGenes/~CNV+(1|Region)+(1|Match_group)+(1|HBCC_BrNum)/res.proc_defaults_remvdgenes")
+res.proc_defaults_remvdgenes <- readRDS("/gpfs/gsfs12/users/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/Removed_MT_RiboGenes/~CNV+(1|Region)+(1|Match_group)+(1|HBCC_BrNum)/res.proc_defaults_remvdgenes")
+dput(names(res.dl_defaults_remvdgenes))
+CT = c("Astrocyte", "Inhibitory_CGE", "Inhibitory_MGE", "L2_3Excitatory", "L5_6Excitatory","Microglia","Oligodendrocytes", "OPC", "VLMC_Endo")
+gs1 = "GO0006119: oxidative phosphorylation"
+for(i in coefNames(res.dl_defaults_remvdgenes)){
+  png(paste(i,"OxPhos_Genes.png", sep = "_"), res =90, width = 1200, height = 350)
+  plot1 <- plotGeneHeatmap(res.dl_defaults_remvdgenes, coef=paste(i), 
+                           genes = sort(geneIds(go.gs[[gs1]])), 
+                           assays=CT, transpose=TRUE) + 
+    ggtitle(trimGenesets(gs1), subtitle = paste(i)) + 
+    theme(legend.position = "bottom", 
+          axis.text.x=element_text(size=7.5, angle=90),
+          axis.text.y=element_text(size=7.5)) + 
+    theme(plot.title = element_text(hjust = 0.5),plot.subtitle = element_text(hjust = 0.5))+
+    xlab('') + ylab('')
+  grid.arrange(plot1)
+  dev.off()
+}
+
+
+genelistNCvsC_dreamlet<- list()
+for(i in names(res.dl_defaults_remvdgenes)){for(j in coefNames(res.dl_defaults_remvdgenes)[2:10]){
+  print(i)
+  genelistNCvsC_dreamlet[[i]][[j]] <- topTable(res.dl_defaults_remvdgenes[[paste(i)]], coef = j, number = Inf)
+}}
+
+Genes_inCNVregions <- readRDS("~/Genes_inCNVregions")
+dreamlet_CNVgenes <- list(Genes_inCNVregions$HBCC_6_15q11del,Genes_inCNVregions$HBCC_6_15q11del,Genes_inCNVregions$HBCC_2del,Genes_inCNVregions$HBCC_8dup,Genes_inCNVregions$HBCC_1_1q21del,Genes_inCNVregions$HBCC_2_1q21dup,Genes_inCNVregions$SMRI_2_22q11del,Genes_inCNVregions$SMRI_3_22q11dup,Genes_inCNVregions$UMB_2_7q11del)
+names(dreamlet_CNVgenes) <- names(genelistNCvsC_dreamlet$Astrocyte)
+
+for (i in names(genelistNCvsC_dreamlet)){for (j in names(genelistNCvsC_dreamlet[[i]])){
+  genelistNCvsC_dreamlet[[i]][[paste(j)]]$diffexpressed <- "NO"
+  # if log2Foldchange > 0.2 and pvalue < 0.05, set as "UP" 
+  genelistNCvsC_dreamlet[[i]][[j]]$diffexpressed[genelistNCvsC_dreamlet[[i]][[j]]$logFC > 0 & genelistNCvsC_dreamlet[[i]][[j]]$P.Value < 0.05] <- "UP"
+  # if log2Foldchange < -0.2 and pvalue < 0.05, set as "DOWN"
+  genelistNCvsC_dreamlet[[i]][[j]]$diffexpressed[genelistNCvsC_dreamlet[[i]][[j]]$logFC < 0 & genelistNCvsC_dreamlet[[i]][[j]]$P.Value < 0.05] <- "DOWN"
+  genelistNCvsC_dreamlet[[i]][[j]]$CNVgene <- 'FALSE'
+  genelistNCvsC_dreamlet[[i]][[j]]$CNVgene[rownames(genelistNCvsC_dreamlet[[i]][[j]]) %in% dreamlet_CNVgenes[[j]]$Gene.name] <- 'TRUE'
+}}
+
+for (i in names(genelistNCvsC_dreamlet)){for (j in names(genelistNCvsC_dreamlet[[i]])){
+  genelistNCvsC_dreamlet[[i]][[paste(j)]]$diffexpressed <- "NO"
+  # if log2Foldchange > 0.2 and pvalue < 0.05, set as "UP" 
+  genelistNCvsC_dreamlet[[i]][[j]]$diffexpressed[genelistNCvsC_dreamlet[[i]][[j]]$logFC > 0 & genelistNCvsC_dreamlet[[i]][[j]]$P.Value < 0.05] <- "UP"
+  # if log2Foldchange < -0.2 and pvalue < 0.05, set as "DOWN"
+  genelistNCvsC_dreamlet[[i]][[j]]$diffexpressed[genelistNCvsC_dreamlet[[i]][[j]]$logFC < 0 & genelistNCvsC_dreamlet[[i]][[j]]$P.Value < 0.05] <- "DOWN"
+  genelistNCvsC_dreamlet[[i]][[j]]$CNVgene <- 'FALSE'
+  genelistNCvsC_dreamlet[[i]][[j]]$CNVgene[rownames(genelistNCvsC_dreamlet[[i]][[j]]) %in% dreamlet_CNVgenes[[j]]$Gene.name] <- 'TRUE'
+}
+}
+
+for(i in names(genelistNCvsC_dreamlet)){for(j in names(genelistNCvsC_dreamlet[[i]])){
+  genelistNCvsC_dreamlet[[i]][[j]]$fdr_0.5 <- 'FALSE'
+  genelistNCvsC_dreamlet[[i]][[j]]$fdr_0.5[genelistNCvsC_dreamlet[[i]][[j]]$adj.P.Val <0.5] <- 'TRUE'
+  genelistNCvsC_dreamlet[[i]][[j]]$fdr_0.1 <- 'FALSE'
+  genelistNCvsC_dreamlet[[i]][[j]]$fdr_0.1[genelistNCvsC_dreamlet[[i]][[j]]$adj.P.Val <0.1] <- 'TRUE'
+  genelistNCvsC_dreamlet[[i]][[j]]$fdr_0.2 <- 'FALSE'
+  genelistNCvsC_dreamlet[[i]][[j]]$fdr_0.2[genelistNCvsC_dreamlet[[i]][[j]]$adj.P.Val <0.2] <- 'TRUE'
+}}
+
+diff_express_df<- list()
+for (i in names(genelistNCvsC_dreamlet)){for(j in names(genelistNCvsC_dreamlet[[i]])){
+  genelistNCvsC_dreamlet[[i]][[j]] <- genelistNCvsC_dreamlet[[i]][[j]][order(genelistNCvsC_dreamlet[[i]][[j]]$adj.P.Val),]
+  diff_express_df[[i]][[j]] <- data.frame(genelistNCvsC_dreamlet[[i]][[j]]$P.Value, genelistNCvsC_dreamlet[[i]][[j]]$logFC, rownames(genelistNCvsC_dreamlet[[i]][[j]]))
+  names(diff_express_df[[i]][[j]]) <- c("pvalue","logFC","gene")
+}
+}
+saveRDS(genelistNCvsC_dreamlet,"/data/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/Removed_MT_RiboGenes/~CNV+(1|Region)+(1|Match_group)+(1|HBCC_BrNum)/genelistNCvsC_dreamlet")
+table(genelistNCvsC_dreamlet$Astrocyte$`CNV16p11.2 del`$CNVgene)
+
+genelistNCvsC_dreamlet_FDR <- list()
+for(i in names(genelistNCvsC_dreamlet)){for(j in names(genelistNCvsC_dreamlet[[i]])){
+  genelistNCvsC_dreamlet_FDR[[i]][[j]] <- subset(genelistNCvsC_dreamlet[[i]][[j]],adj.P.Val <0.1)
+}}
+
+for(i in names(genelistNCvsC_dreamlet_FDR)){for (j in names(genelistNCvsC_dreamlet_FDR[[i]])){
+  genelistNCvsC_dreamlet_FDR[[i]][[j]]$DCIS_1 <- genelistNCvsC_dreamlet_FDR[[i]][[j]]$logFC
+}}
+
+library(pathview)
+for(i in names(genelistNCvsC_dreamlet_FDR)){for(j in names(genelistNCvsC_dreamlet_FDR[[i]])){
+  datagene <- rownames(genelistNCvsC_dreamlet_FDR[[i]][[j]])
+  dataFold <- subset(genelistNCvsC_dreamlet_FDR[[i]][[j]], select ="logFC" )
+  df <- data.frame(matrix(ncol = 2, nrow = length(datagene)))
+  datageneORF <-unlist(datagene)
+  dataFoldun = unlist(dataFold)
+  df[1] = datagene
+  df[2] = dataFoldun
+  rownames(df) = make.names(df[,1], unique=TRUE)
+  df[,1] <- NULL
+  if(nrow(df)>0){
+  pv.out <- pathview(gene.data = df, pathway.id = "00190",gene.idtype="symbol",species = "hsa", out.suffix = paste(i,j,"oxphos_FDR", sep = "_"))
+  }
+}}
+
+df <- list()
+for(i in names(genelistNCvsC_dreamlet_FDR)){for(j in names(genelistNCvsC_dreamlet_FDR[[i]])){
+  datagene <- rownames(genelistNCvsC_dreamlet_FDR[[i]][[j]])
+  dataFold <- subset(genelistNCvsC_dreamlet_FDR[[i]][[j]], select ="logFC")
+  df[[i]][[j]] <- data.frame(matrix(ncol = 2, nrow = length(datagene)))
+  datageneORF <-unlist(datagene)
+  dataFoldun = unlist(dataFold)
+  df[[i]][[j]][1] = datagene
+  df[[i]][[j]][2] = dataFoldun
+  rownames(df[[i]][[j]]) = make.names(df[[i]][[j]][,1], unique=TRUE)
+  df[[i]][[j]][,1] <- NULL
+  if(nrow(df[[i]][[j]])>0){
+    pv.out <- pathview(gene.data = df[[i]][[j]], pathway.id = "00010",gene.idtype="symbol",species = "hsa", out.suffix = paste(i,j,"glycosis_FDR", sep = "_"))
+  }
+}}
+
+
+library(STRINGdb)
+library(png)
+library(plyr)
+library(RCurl)
+library(methods)
+library(plotrix)
+library(RColorBrewer)
+library(igraph)
+library(igraphdata)
+library(sqldf)
+library(gplots)
+string_db <- STRINGdb$new( version="11.5", score_threshold=200, network_type="full", input_directory="",protocol="http")
+
+diff_expressed_mapped <- list()
+hits <- list()
+for(i in names(diff_express_df)){for(j in names(diff_express_df[[i]])){
+  string_db$set_background(diff_express_df[[i]][[j]]$gene) 
+  diff_expressed_mapped[[i]][[j]]<-string_db$map(diff_express_df[[i]][[j]],"gene",removeUnmappedRows = TRUE) 
+  hits<-diff_expressed_mapped[[i]][[j]]$STRING_id[1:200]
+  string_db$get_png(hits, file=paste(i,j,"stringDB_network.png"))
+}}
+
+res_zenith<- list()
+for(i in coefNames(res.dl_defaults_remvdgenes)[2:10]){
+  res_zenith[[i]] = zenith_gsa(res.dl_defaults_remvdgenes, coef = paste(i), go.gs)
+}
+res_zenith<- readRDS("/data/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/Removed_MT_RiboGenes/~CNV+(1|Region)+(1|Match_group)+(1|HBCC_BrNum)/res_zenith")
+
+df <- list()
+for(i in names(res_zenith)){
+  # get genesets with FDR < 10%
+  gs = c("GO0006119: oxidative phosphorylation","GO0005746: mitochondrial respirasome","GO0036293: response to decreased oxygen levels","GO0006757: ATP generation from ADP" ,"GO0034599: cellular response to oxidative stress","GO0042775: mitochondrial ATP synthesis coupled electron transport","GO0061620: glycolytic process through glucose-6-phosphate")
+  # keep only results of these genesets 
+  df[[i]] = res_zenith[[i]][res_zenith[[i]]$Geneset %in% gs,]
+  # plot results, but with no limit based on the highest/lowest t-statistic
+  df[[i]]$t <- df[[i]]$delta/df[[i]]$se 
+}
+
+zenith_df <- Reduce(rbind,df)
+
+library(plyr)
+for(i in names(df)){
+  df[[i]]$assay <- revalue(df[[i]]$assay, c("Inhibitory_CGE"="CGE-Derived Inhibitory Neurons", "Inhibitory_MGE"="MGE-Derived Inhibitory Neurons","L2_3Excitatory" ="Upper Layer Excitatory Neurons","L5_6Excitatory"="Lower Layer Excitatory Neurons"))
+  df[[i]]$assay <- factor(df[[i]]$assay,levels = rev(c("VLMC_Endo", "OPC", "Oligodendrocytes", "Microglia", "Astrocyte", "Upper Layer Excitatory Neurons", "Lower Layer Excitatory Neurons", "MGE-Derived Inhibitory Neurons", "CGE-Derived Inhibitory Neurons")))
+}
+
+library(stringr)
+i <- "CNV7q11.23 WBS del"
+for(i in names(df)){
+  # Heatmap of results
+  png(paste(i,"zenith_slim.png"), width = 1200, height = 1400, res = 115)
+  plot1 <- plotZenithResults(df[[i]], 2,1)+
+    ggtitle(paste("Zenith",i))+
+    scale_y_discrete(labels = function(y) str_wrap(y, width = 30))+
+    theme(axis.text=element_text(size=15),
+           axis.title=element_text(size=14))
+  grid.arrange(plot1)
+  dev.off()
+}
+
+zenith_celltype<- list()
+for(i in names(df)){
+  zenith_celltype[[i]] <- split(df[[i]],df[[i]]$assay)
+}
+
+zenith_celltype_direction<- list()
+for(i in names(zenith_celltype)){for(j in names(zenith_celltype[[i]])){
+  zenith_celltype[[i]][[j]] <- zenith_celltype[[i]][[j]][order(zenith_celltype[[i]][[j]]$FDR, decreasing=FALSE),]
+  zenith_celltype_direction[[i]][[j]] <- split(zenith_celltype[[i]][[j]],zenith_celltype[[i]][[j]]$Direction)
+}}
+
+zenith_celltype_cutdown<- list()
+for(i in names(zenith_celltype_direction)){for(j in names(zenith_celltype_direction[[i]])){for(k in names(zenith_celltype_direction[[i]][[j]])){
+  zenith_celltype_cutdown[[i]][[j]][[k]] <- zenith_celltype_direction[[i]][[j]][[k]][1:7,]
+}}}
+
+zenith_celltype_TOP<- list()
+for(i in names(zenith_celltype_cutdown)){for(j in names(zenith_celltype_cutdown[[i]])){
+  zenith_celltype_TOP[[i]][[j]] <- Reduce(rbind,zenith_celltype_cutdown[[i]][[j]])
+}}
+
+for(i in names(zenith_celltype)){for(j in names(zenith_celltype[[i]])){
+  zenith_celltype[[i]][[j]]$Geneset <- factor(zenith_celltype[[i]][[j]]$Geneset,levels = unique(zenith_celltype[[i]][[j]]$Geneset))
+}}
+
+zenith_celltype<- readRDS("/gpfs/gsfs12/users/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/Removed_MT_RiboGenes/~CNV+(1|Region)+(1|Match_group)+(1|HBCC_BrNum)/zenith_celltype_DF")
+
+zenith_CNV<- list()
+zenith_CNV_cd<- list()
+for(i in names(zenith_celltype)){
+  zenith_celltype[[i]][[j]] <- zenith_celltype[[i]][[j]]
+  zenith_CNV[[i]] <- Reduce(rbind,zenith_celltype[[i]])
+  zenith_CNV_cd[[i]] <- zenith_CNV[[i]][grepl("mitochondria|oxygen|oxidative|ATP",zenith_CNV[[i]]$Geneset),]
+}
+
+for(i in names(zenith_CNV_cd)){
+  if(nrow(zenith_CNV_cd[[i]])>0){
+  png(paste(i,"zenithdotplot_ETC_full.png"), height = 5000, width = 1200, res =100)
+  plot1 <- ggplot(zenith_CNV_cd[[i]],aes(x=FDR, y = Geneset, color = FDR, size =NGenes)) + 
+    geom_point() +
+    facet_grid(rows = vars(assay), cols = vars(Direction), scales="free_y", switch = 'y')+
+    theme_cowplot()
+  grid.arrange(plot1)
+  dev.off()
+  }
+}
+library(plyr)
+zenith_df$assay <- revalue(zenith_df$assay, c("Inhibitory_CGE"="CGE-Derived Inhibitory Neurons", "Inhibitory_MGE"="MGE-Derived Inhibitory Neurons","L2_3Excitatory" ="Upper Layer Excitatory Neurons","L5_6Excitatory"="Lower Layer Excitatory Neurons"))
+zenith_df$assay <- factor(zenith_df$assay,levels = rev(c("VLMC_Endo", "OPC", "Oligodendrocytes", "Microglia", "Astrocyte", "Upper Layer Excitatory Neurons", "Lower Layer Excitatory Neurons", "MGE-Derived Inhibitory Neurons", "CGE-Derived Inhibitory Neurons")))
+dput(levels(factor(zenith_df$coef)))
+zenith_df_CNV <- split(zenith_df,zenith_df$coef)
+for(i in names(zenith_df_CNV)){
+  print(i)
+  print(sum(abs(zenith_df_CNV[[i]]$FDR)))
+}
+
+sum(zenith_df$t)
+zenith_df$coef <- factor(zenith_df$coef,levels = c("CNV7q11.23 WBS del","CNV16p11.2 del","CNV15q11.2 BP1-2 del","CNV22q11.2 del","CNV1q21.1 del","CNV15q11.2 BP1-2 dup", "CNV1q21.1 dup", "CNV22q11.2 dup","CNV16p11.2 dup"))
+library(cowplot)
+png("zenithdotplot_mito_ATPterms_full.png", height = 2000, width = 3000, res =115)
+plot1 <- ggplot(zenith_df,aes(x=FDR, y = Geneset, color = FDR, size = abs(t))) + 
+  geom_point() +
+  theme_cowplot()+
+  facet_grid(rows = vars(assay), cols = vars(coef), scales="free_y", switch = 'y')+
+  xlim(0,0.2)+
+  geom_vline(xintercept= 0.1,linetype=3,colour="red")+
+  panel_border()
+grid.arrange(plot1)
+dev.off()
+
+names(df)
+library(EnrichmentBrowser)
+library(zenith)
+library(grid)
+library(gridBase)
+library(gridExtra)
+names(df)
+i <- "CNV22q11.2 del"
+i <- "CNV7q11.23 WBS del"
+for(i in names(df)){
+  # plot results, but with no limit based on the highest/lowest t-statistic
+  png(paste(i,"zenith_results.png"), width = 1200, height = 1400, res = 110)
+  plot1 <- plotZenithResults(df[[i]],2,2)+
+    theme_cowplot()+
+    theme(axis.text.x = element_text(angle = 60, hjust=1))
+  grid.arrange(plot1)
+  dev.off()
+}
+
+res_mash<- list()
+for(i in coefNames(res.dl_defaults_remvdgenes)[2:10]){
+  res_mash[[i]] = run_mash(res.dl_defaults_remvdgenes, coef=paste(i))
+}
+library(zenith)
+df_gs<- list()
+for(i in names(res_mash)){
+  df_gs[[i]] = zenith_gsa(res_mash[[i]], go.gs)
+}
+library(EnrichmentBrowser)
+# 
+gs.kegg = getGenesets(org = "hsa", 
+                      db = "kegg", 
+                      gene.id.type = "SYMBOL", 
+                      return.type = "GeneSetCollection")
+gs.kegg.symbol <- idMap(gs.kegg, org = "hsa", from = "ENSEMBL", to = "SYMBOL") 
+
+res_zenith_KEGG<- list()
+for(i in coefNames(res.dl_defaults_remvdgenes)[2:10]){
+  res_zenith_KEGG[[i]] = zenith_gsa(res.dl_defaults_remvdgenes, coef= paste(i), gs.kegg.symbol)
+}
+
+for(i in names(res_zenith_KEGG)){
+  # Heatmap of results
+  png(paste(i,"describe_kegg.png"), height = 750, width =850, res =100)
+  plot1 <- plotZenithResults(res_zenith_KEGG[[i]])+
+    ggtitle(paste("Kegg",i))
+  grid.arrange(plot1)
+  dev.off()
+}
+
+for(i in names(res_zenith_KEGG)){for(j in res_zenith_KEGG[[i]]$Geneset){
+  res_zenith_KEGG[[i]]$Description[res_zenith_KEGG[[i]]$Geneset==paste(j)]<- description(gs.kegg.symbol[[j]])
+}}
+
+for(i in names(res_zenith_KEGG)){
+  res_zenith_KEGG[[i]]$Geneset_old <- res_zenith_KEGG[[i]]$Geneset
+  res_zenith_KEGG[[i]]$Geneset <- res_zenith_KEGG[[i]]$Description
+}
+res_zenith_KEGG_fdrsig<- list()
+for(i in names(res_zenith_KEGG)){
+  res_zenith_KEGG_fdrsig[[i]] <-subset(res_zenith_KEGG[[i]],FDR <0.1)
+}
+
+res_zenith_KEGG <- readRDS("/data/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/Removed_MT_RiboGenes/~CNV+(1|Region)+(1|Match_group)+(1|HBCC_BrNum)/KEGG/res_zenith_KEGG")
+coefNames(res.dl_defaults_remvdgenes)
+names(res.dl_defaults_remvdgenes) <- c("Astrocyte","CGE-Derived Inhibitory Neurons", "MGE-Derived Inhibitory Neurons", "Lower Excitatory Neurons", "Upper Excitatory Neurons","Microglia", "Oligodendrocytes", "OPC", "VLMC_Endo")
+
+CT = rev(c("CGE-Derived Inhibitory Neurons", "MGE-Derived Inhibitory Neurons", "Lower Excitatory Neurons", "Upper Excitatory Neurons", "Astrocyte","Microglia", "Oligodendrocytes", "OPC", "VLMC_Endo"))
+
+png("CNV7q11_DNAJC30_expression.png", width = 2000, height = 800, res = 125)
+plot1<- plotGeneHeatmap(res.dl_defaults_remvdgenes, coef="CNV7q11.23 WBS del", 
+                                    genes = "DNAJC30", 
+                                    assays=CT, transpose=TRUE) + 
+  ggtitle("DNAJC30", subtitle = "CNV7q11.23 WBS del") + 
+  theme(legend.position = "bottom", 
+        axis.text.x=element_text(size=7.5, angle=90),
+        axis.text.y=element_text(size=7.5)) + 
+  theme(plot.title = element_text(hjust = 0.5),plot.subtitle = element_text(hjust = 0.5))+
+  xlab('') + ylab('')
+grid.arrange(plot1)
+dev.off()
+
+sort(geneIds(gs.kegg.symbol[[gs1]]))
+names(go.gs[grep("mitochondrial respiratory chain complex",names(go.gs))])
+gs1 = "GO0005747: mitochondrial respiratory chain complex I"
+
+mito_resp_1 <- list()
+for(i in coefNames(res.dl_defaults_remvdgenes)){
+  png(paste(i,"mito_resp_comp1_genes.png"), width = 2000, height = 800, res = 110)
+  mito_resp_1[[i]] <- plotGeneHeatmap(res.dl_dreamletcountsdefaults, coef=paste(i), 
+                     genes = sort(geneIds(go.gs[[gs1]])), 
+                     assays=CT, transpose=TRUE) + 
+      ggtitle(trimGenesets(gs1), subtitle = paste(i)) + 
+      theme(legend.position = "bottom", 
+            axis.text.x=element_text(size=7.5, angle=90),
+            axis.text.y=element_text(size=7.5)) + 
+      theme(plot.title = element_text(hjust = 0.5),plot.subtitle = element_text(hjust = 0.5))+
+      xlab('') + ylab('')
+  grid.arrange(mito_resp_1[[i]])
+  dev.off()
+}
+complex1 <- sort(geneIds(go.gs[[gs1]]))
+for (i in names(genelistNCvsC_dreamlet_refrmt)){for(j in names(genelistNCvsC_dreamlet_refrmt[[paste(i)]])){
+  genelist_complex1 <- genelistNCvsC_dreamlet_refrmt[[paste(i)]][[j]][rownames(genelistNCvsC_dreamlet_refrmt[[paste(i)]][[j]]) %in% complex1,]
+  ggplot_volcano[[j]] <- ggplot(data=genelistNCvsC_dreamlet_refrmt[[paste(i)]][[j]], aes(x=logFC, y=-log10(P.Value))) +
+    geom_point(color= "grey") + 
+    theme_minimal() +
+    scale_color_manual(values=c("grey")) +
+    ggtitle(paste(j, sep=' '))+
+    theme(plot.title = element_text(hjust=0.5, size = 15))+
+    ylim(0,7)+
+    geom_hline(yintercept=-log10(0.05),linetype="dashed", color = "blue")+
+    geom_point(data=genelist_complex1, aes(x=logFC, y=-log10(P.Value)), color = "red")
+}
+  volcano_plots[[paste(i)]] <- ggplot_volcano
+  png(paste("ETC_1_label",i,".png"), width = 1800, height=2250, res = 100)
+  grid.arrange(volcano_plots[[paste(i)]]$Astrocyte,volcano_plots[[paste(i)]]$Inhibitory_CGE,volcano_plots[[paste(i)]]$Inhibitory_MGE,volcano_plots[[paste(i)]]$L2_3Excitatory,volcano_plots[[paste(i)]]$L5_6Excitatory,volcano_plots[[paste(i)]]$Microglia,volcano_plots[[paste(i)]]$Oligodendrocytes,volcano_plots[[paste(i)]]$OPC,volcano_plots[[paste(i)]]$VLMC_Endo, ncol = 3,top=textGrob(paste('Dreamlet',i), gp=gpar(fontsize=20)))
+  dev.off()
+}
+
+png("mito_resp_1_genes.png", width = 4000, height = 3200, res = 200)
+grid.arrange(mito_resp_1$`CNV15q11.2 BP1-2 del`,mito_resp_1$`CNV15q11.2 BP1-2 dup`,mito_resp_1$`CNV16p11.2 del`,mito_resp_1$`CNV16p11.2 dup`,mito_resp_1$`CNV22q11.2 del`,mito_resp_1$`CNV22q11.2 dup`,mito_resp_1$`CNV7q11.23 WBS del`,ncol = 2)
+dev.off()
+
+names(go.gs[grep("mitochondrial respiratory chain complex",names(go.gs))])
+gs1 = "GO0005749: mitochondrial respiratory chain complex II, succinate dehydrogenase complex (ubiquinone)"
+complex2 <- sort(geneIds(go.gs[[gs1]]))
+for (i in names(genelistNCvsC_dreamlet_refrmt)){for(j in names(genelistNCvsC_dreamlet_refrmt[[paste(i)]])){
+  genelist_complex1 <- genelistNCvsC_dreamlet_refrmt[[paste(i)]][[j]][rownames(genelistNCvsC_dreamlet_refrmt[[paste(i)]][[j]]) %in% complex2,]
+  ggplot_volcano[[j]] <- ggplot(data=genelistNCvsC_dreamlet_refrmt[[paste(i)]][[j]], aes(x=logFC, y=-log10(P.Value))) +
+    geom_point(color= "grey") + 
+    theme_minimal() +
+    scale_color_manual(values=c("grey")) +
+    ggtitle(paste(j, sep=' '))+
+    theme(plot.title = element_text(hjust=0.5, size = 15))+
+    ylim(0,7)+
+    geom_hline(yintercept=-log10(0.05),linetype="dashed", color = "blue")+
+    geom_point(data=genelist_complex1, aes(x=logFC, y=-log10(P.Value)), color = "red")
+}
+  volcano_plots[[paste(i)]] <- ggplot_volcano
+  png(paste("ETC_2_label",i,".png"), width = 1800, height=2250, res = 100)
+  grid.arrange(volcano_plots[[paste(i)]]$Astrocyte,volcano_plots[[paste(i)]]$Inhibitory_CGE,volcano_plots[[paste(i)]]$Inhibitory_MGE,volcano_plots[[paste(i)]]$L2_3Excitatory,volcano_plots[[paste(i)]]$L5_6Excitatory,volcano_plots[[paste(i)]]$Microglia,volcano_plots[[paste(i)]]$Oligodendrocytes,volcano_plots[[paste(i)]]$OPC,volcano_plots[[paste(i)]]$VLMC_Endo, ncol = 3,top=textGrob(paste('Dreamlet',i), gp=gpar(fontsize=20)))
+  dev.off()
+}
+
+mito_resp_2 <- list()
+for(i in coefNames(res.dl_defaults_remvdgenes)){
+  png(paste(i,"mito_resp_comp2_genes.png"), width = 2000, height = 800, res = 110)
+  mito_resp_2[[i]] <- plotGeneHeatmap(res.dl_dreamletcountsdefaults, coef=paste(i), 
+                                      genes = sort(geneIds(go.gs[[gs1]])), 
+                                      assays=CT, transpose=TRUE) + 
+    ggtitle(trimGenesets(gs1), subtitle = paste(i)) + 
+    theme(legend.position = "bottom", 
+          axis.text.x=element_text(size=7.5, angle=90),
+          axis.text.y=element_text(size=7.5)) + 
+    theme(plot.title = element_text(hjust = 0.5),plot.subtitle = element_text(hjust = 0.5))+
+    xlab('') + ylab('')
+  grid.arrange(mito_resp_2[[i]])
+  dev.off()
+}
+
+png("mito_resp_2_genes.png", width = 4000, height = 3200, res = 200)
+grid.arrange(mito_resp_2$`CNV15q11.2 BP1-2 del`,mito_resp_2$`CNV15q11.2 BP1-2 dup`,mito_resp_2$`CNV16p11.2 del`,mito_resp_2$`CNV16p11.2 dup`,mito_resp_2$`CNV22q11.2 del`,mito_resp_2$`CNV22q11.2 dup`,mito_resp_2$`CNV7q11.23 WBS del`,ncol = 2)
+dev.off()
+
+names(go.gs[grep("mitochondrial respiratory chain complex",names(go.gs))])
+gs1 = "GO0005750: mitochondrial respiratory chain complex III"
+
+mito_resp_3 <- list()
+for(i in coefNames(res.dl_defaults_remvdgenes)){
+  png(paste(i,"mito_resp_comp3_genes.png"), width = 2000, height = 800, res = 110)
+  mito_resp_3[[i]] <- plotGeneHeatmap(res.dl_dreamletcountsdefaults, coef=paste(i), 
+                                      genes = sort(geneIds(go.gs[[gs1]])), 
+                                      assays=CT, transpose=TRUE) + 
+    ggtitle(trimGenesets(gs1), subtitle = paste(i)) + 
+    theme(legend.position = "bottom", 
+          axis.text.x=element_text(size=7.5, angle=90),
+          axis.text.y=element_text(size=7.5)) + 
+    theme(plot.title = element_text(hjust = 0.5),plot.subtitle = element_text(hjust = 0.5))+
+    xlab('') + ylab('')
+  grid.arrange(mito_resp_3[[i]])
+  dev.off()
+}
+complex3 <- sort(geneIds(go.gs[[gs1]]))
+for (i in names(genelistNCvsC_dreamlet_refrmt)){for(j in names(genelistNCvsC_dreamlet_refrmt[[paste(i)]])){
+  genelist_complex1 <- genelistNCvsC_dreamlet_refrmt[[paste(i)]][[j]][rownames(genelistNCvsC_dreamlet_refrmt[[paste(i)]][[j]]) %in% complex3,]
+  ggplot_volcano[[j]] <- ggplot(data=genelistNCvsC_dreamlet_refrmt[[paste(i)]][[j]], aes(x=logFC, y=-log10(P.Value))) +
+    geom_point(color= "grey") + 
+    theme_minimal() +
+    scale_color_manual(values=c("grey")) +
+    ggtitle(paste(j, sep=' '))+
+    theme(plot.title = element_text(hjust=0.5, size = 15))+
+    ylim(0,7)+
+    geom_hline(yintercept=-log10(0.05),linetype="dashed", color = "blue")+
+    geom_point(data=genelist_complex1, aes(x=logFC, y=-log10(P.Value)), color = "red")
+}
+  volcano_plots[[paste(i)]] <- ggplot_volcano
+  png(paste("ETC_3_label",i,".png"), width = 1800, height=2250, res = 100)
+  grid.arrange(volcano_plots[[paste(i)]]$Astrocyte,volcano_plots[[paste(i)]]$Inhibitory_CGE,volcano_plots[[paste(i)]]$Inhibitory_MGE,volcano_plots[[paste(i)]]$L2_3Excitatory,volcano_plots[[paste(i)]]$L5_6Excitatory,volcano_plots[[paste(i)]]$Microglia,volcano_plots[[paste(i)]]$Oligodendrocytes,volcano_plots[[paste(i)]]$OPC,volcano_plots[[paste(i)]]$VLMC_Endo, ncol = 3,top=textGrob(paste('Dreamlet',i), gp=gpar(fontsize=20)))
+  dev.off()
+}
+
+
+png("mito_resp_3_genes.png", width = 4000, height = 3200, res = 200)
+grid.arrange(mito_resp_3$`CNV15q11.2 BP1-2 del`,mito_resp_3$`CNV15q11.2 BP1-2 dup`,mito_resp_3$`CNV16p11.2 del`,mito_resp_3$`CNV16p11.2 dup`,mito_resp_3$`CNV22q11.2 del`,mito_resp_3$`CNV22q11.2 dup`,mito_resp_3$`CNV7q11.23 WBS del`,ncol = 2)
+dev.off()
+library(devtools)
+install_github("juliedwhite/miamiplot", build_vignettes = TRUE)
+library(miamiplot)
+head(genelistNCvsC_dreamlet$Astrocyte$`CNV22q11.2 del`)
+library(biomaRt)
+
+biomart_genes_GRH37 = read.csv("~/biomart_genes_GRH37.csv")
+colnames(biomart_genes_GRH37) <- c("Gene.stable.ID","Gene.name", "Chromosome.scaffold.name","Gene.start.bp", "Gene.end.bp","Strand")
+table(biomart_genes_GRH37$Chromosome.scaffold.name)
+
+for(i in names(genelistNCvsC_dreamlet)){for(j in names(genelistNCvsC_dreamlet[[i]])){
+  genelistNCvsC_dreamlet[[i]][[j]]$gene.start <- biomart_genes_GRH37$Gene.start.bp[match(rownames(genelistNCvsC_dreamlet[[i]][[j]]),biomart_genes_GRH37$Gene.name)]
+  genelistNCvsC_dreamlet[[i]][[j]]$chromosome <- biomart_genes_GRH37$Chromosome.scaffold.name[match(rownames(genelistNCvsC_dreamlet[[i]][[j]]),biomart_genes_GRH37$Gene.name)]
+}}
+
+chr22_del<- list()
+cnv22q11_genes <- list()
+plot1 <- list()
+for(i in names(genelistNCvsC_dreamlet)){
+  chr22_del[[i]] <- subset(genelistNCvsC_dreamlet[[i]]$`CNV22q11.2 del`, chromosome == "22")
+  chr22_del[[i]]$chromosome <- as.numeric(chr22_del[[i]]$chromosome)
+  chr22_del[[i]]$gene.start <- as.numeric(chr22_del[[i]]$gene.start)
+  chr22_del[[i]]$direction <- "UP"
+  chr22_del[[i]]$direction[chr22_del[[i]]$logFC <0 ] <- "DOWN"
+  cnv22q11_genes[[i]] <- subset(genelistNCvsC_dreamlet$Astrocyte$`CNV22q11.2 del`,CNVgene== "TRUE")
+  cnv22q11_genes[[i]]$gene.name <- rownames(cnv22q11_genes[[i]])
+  plot1[[i]] <- ggplot(chr22_del[[i]], aes (x= gene.start,y = logFC))+
+    geom_point()+
+    geom_point(data = cnv22q11_genes[[i]],  aes (x= gene.start,y = logFC),color = "red")+
+    geom_smooth(method="loess", se=TRUE, fullrange=FALSE, level=0.95)+
+    facet_wrap(~chromosome)+
+    geom_hline(yintercept=0)+
+    theme_cowplot()+
+    theme(plot.title = element_text(hjust = 0.5))+
+    ggtitle(paste(i))
+}
+
+png("CNV22q11_deletion.png", width = 1500, height = 1200,res = 100)
+grid.arrange(plot1$Inhibitory_CGE,plot1$Inhibitory_MGE,plot1$L2_3Excitatory,plot1$L5_6Excitatory,plot1$Astrocyte,plot1$Microglia,plot1$Oligodendrocytes,plot1$OPC,plot1$VLMC_Endo, ncol=4,top=textGrob(paste('22q11.2 Deletion, LogFC on Chromosome 22'), gp=gpar(fontsize=20)))
+dev.off()
+
+chr22_dup<- list()
+cnv22q11_genes <- list()
+plot1 <- list()
+for(i in names(genelistNCvsC_dreamlet)){for(j in names(genelistNCvsC_dreamlet[[i]])){
+  chr22_dup[[i]][[j]] <- genelistNCvsC_dreamlet[[i]][[j]]
+  chr22_dup[[i]][[j]]$chromosome <- as.numeric(chr22_dup[[i]][[j]]$chromosome)
+  chr22_dup[[i]][[j]]$gene.start <- as.numeric(chr22_dup[[i]][[j]]$gene.start)
+  chr22_dup[[i]][[j]]$direction <- "UP"
+  chr22_dup[[i]][[j]]$direction[chr22_dup[[i]][[j]]$logFC <0 ] <- "DOWN"
+  cnv22q11_genes[[i]][[j]] <- subset(genelistNCvsC_dreamlet[[i]][[j]],CNVgene== "TRUE")
+  cnv22q11_genes[[i]][[j]]$gene.name <- rownames(cnv22q11_genes[[i]][[j]])
+  plot1[[i]][[j]] <- ggplot(chr22_dup[[i]][[j]], aes (x= gene.start,y = logFC))+
+    geom_point()+
+    geom_point(data = cnv22q11_genes[[i]][[j]],  aes (x= gene.start,y = logFC),color = "red")+
+    geom_smooth(method="loess", se=TRUE, fullrange=FALSE, level=0.95)+
+    facet_wrap(~chromosome)+
+    geom_hline(yintercept=0)+
+    theme_cowplot()+
+    theme(plot.title = element_text(hjust = 0.5))+
+    ggtitle(paste(i))
+}}
+
+for(i in names(plot1$Astrocyte)){
+  png(paste(i,"miamiplot.png"), width = 4000, height = 4000,res = 100)
+  grid.arrange(plot1$Inhibitory_CGE[[i]],plot1$Inhibitory_MGE[[i]],plot1$L2_3Excitatory[[i]],plot1$L5_6Excitatory[[i]],plot1$Astrocyte[[i]],plot1$Microglia[[i]],plot1$Oligodendrocytes[[i]],plot1$OPC[[i]],plot1$VLMC_Endo[[i]], ncol=4,top=textGrob(paste(i,'LogFC'), gp=gpar(fontsize=20)))
+  dev.off()
+}
+
+chr7_excitatory_del <- subset(genelistNCvsC_dreamlet$L2_3Excitatory$`CNV7q11.23 WBS del`, chromosome =="7")
+chr7_excitatory_del$chromosome <- as.numeric(chr7_excitatory_del$chromosome)
+chr7_excitatory_del$gene.start <- as.numeric(chr7_excitatory_del$gene.start)
+chr7_excitatory_del$direction <- "UP"
+chr7_excitatory_del$direction[chr7_excitatory_del$logFC <0 ] <- "DOWN"
+chr7_excitatory_del_down <- subset(chr7_excitatory_del, direction == "DOWN")
+cnv7q11 <- subset(genelistNCvsC_dreamlet$L2_3Excitatory$`CNV7q11.23 WBS del`,CNVgene== "TRUE")
+
+cnv7q11$gene.name <- rownames(cnv7q11)
+png("cnv7q11_layer2_3.png", width = 800, res = 100)
+plot1 <- ggplot(chr7_excitatory_del, aes (x= gene.start,y = logFC))+
+  geom_point()+
+  geom_point(data = cnv7q11,  aes (x= gene.start,y = logFC),color = "red")+
+  geom_smooth(method="loess", se=TRUE, fullrange=FALSE, level=0.95)+
+  facet_wrap(~chromosome)+
+  geom_hline(yintercept=0)+
+  theme_cowplot()+
+  theme(plot.title = element_text(hjust = 0.5))+
+  ggtitle("Lower Layer Excitatory Neurons")
+grid.arrange(plot1)
+dev.off()
+
+
+chr22_astrocyte_del <- subset(genelistNCvsC_dreamlet$Astrocyte$`CNV22q11.2 del`, chromosome =="22")
+chr22_astrocyte_del$chromosome <- as.numeric(chr22_astrocyte_del$chromosome)
+chr22_astrocyte_del$gene.start <- as.numeric(chr22_astrocyte_del$gene.start)
+chr22_astrocyte_del$direction <- "UP"
+chr22_astrocyte_del$direction[chr22_astrocyte_del$logFC <0 ] <- "DOWN"
+chr22_astrocyte_del_down <- subset(chr22_astrocyte_del, direction == "DOWN")
+cnv22q11 <- subset(genelistNCvsC_dreamlet$Astrocyte$`CNV22q11.2 del`,CNVgene== "TRUE")
+cnv22q11$gene.name <- rownames(cnv22q11)
+
+png("cnv22q11_astro.png", width = 800, res = 100)
+plot1 <- ggplot(chr22_astrocyte_del, aes (x= gene.start,y = logFC))+
+  geom_point()+
+  geom_point(data = cnv22q11,  aes (x= gene.start,y = logFC),color = "red")+
+  geom_smooth(method="loess", se=TRUE, fullrange=FALSE, level=0.95)+
+  facet_wrap(~chromosome)+
+  geom_hline(yintercept=0)+
+  theme_cowplot()+
+  theme(plot.title = element_text(hjust = 0.5))+
+  ggtitle("Astrocytes")
+grid.arrange(plot1)
+dev.off()
+
+t <- data.frame(res_zenith_KEGG$`CNV7q11.23 WBS del`$Description,res_zenith_KEGG$`CNV7q11.23 WBS del`$Geneset_old)
+t <- t[grep("Park",t$res_zenith_KEGG..CNV16p11.2.del..Description),]
+gs1 = "GO0006123: mitochondrial electron transport, cytochrome c to oxygen"
+ETC_nadh_ubiquinone <- list()
+for(i in coefNames(res.dl_defaults_remvdgenes)){
+  png(paste(i,"NDUFAF4.png"), width = 2000, height = 800, res = 110)
+  ETC_nadh_ubiquinone[[i]] <- plotGeneHeatmap(res.dl_dreamletcountsdefaults, coef=paste(i), 
+                                      genes = "NDUFAF4", 
+                                      assays=CT, transpose=TRUE) + 
+    ggtitle("NDUFAF4", subtitle = paste(i)) + 
+    theme(legend.position = "bottom", 
+          axis.text.x=element_text(size=7.5, angle=90),
+          axis.text.y=element_text(size=7.5)) + 
+    theme(plot.title = element_text(hjust = 0.5),plot.subtitle = element_text(hjust = 0.5))+
+    xlab('') + ylab('')
+  grid.arrange(ETC_nadh_ubiquinone[[i]])
+  dev.off()
+}
+
+schizo_genes <- c()
+schizo_genes_RCV <- list()
+for(i in coefNames(res.dl_defaults_remvdgenes)){
+  png(paste(i,"schizogenes_frommultiome.png"), width = 6000, height = 800, res = 110)
+  schizo_genes_RCV[[i]] <- plotGeneHeatmap(res.dl_defaults_remvdgenes, coef=paste(i), 
+                                              genes = unique(Multiome_Schizophrenia_RiskGenes$`Schizophrenia Risk Gene`), 
+                                              assays=CT, transpose=TRUE) + 
+    ggtitle("He et al. 2021 Prioritization of schizophrenia risk genes \n from GWAS results by integrating multi-omics data", subtitle = paste(i)) + 
+    theme(legend.position = "bottom", 
+          axis.text.x=element_text(size=7.5, angle=90),
+          axis.text.y=element_text(size=7.5)) + 
+    theme(plot.title = element_text(hjust = 0.5),plot.subtitle = element_text(hjust = 0.5))+
+    xlab('') + ylab('')
+  grid.arrange(schizo_genes_RCV[[i]])
+  dev.off()
+}
+
+Multiome_Schizophrenia_RiskGenes<- read_excel("~/Multiome_Schizophrenia_RiskGenes.xlsx", sheet = "MULTIOME_Schizo")
+library(readxl)
+MappingLoci_Schizophrenia_RiskGenes<- read_excel("~/MappingSchizophreniaLoci_SMRGenes.xlsx")
+Autism_RiskGenes<- read_excel("~/Multiome_Schizophrenia_RiskGenes.xlsx", sheet = "SFARI_Autism")
+
+form <- ~CNV + nFeature_RNA+(1|Region) + (1 | HBCC_BrNum) + (1 | Match_group)
+res.proc_defaults_nfeature_remvdgenes = processAssays(pb_adult_dreamlet_remvd_genes, form, min.cells=0)
+res.proc_defaults_nfeature_remvdgenes <- readRDS("/gpfs/gsfs12/users/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/Removed_MT_RiboGenes/~CNV+nfeature+(1|Region)+(1|Match_group)+(1|HBCC_BrNum)/res.proc_defaults_nfeature_remvdgenes")
+
+res.dl_defaults_nfeature_remvdgenes <- dreamlet(res.proc_defaults_nfeature_remvdgenes, form)
+res.dl_defaults_nfeature_remvdgenes<- readRDS("/gpfs/gsfs12/users/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/Removed_MT_RiboGenes/~CNV+nfeature+(1|Region)+(1|Match_group)+(1|HBCC_BrNum)/res.dl_defaults_nfeature_remvdgenes")
+
+for(i in names(df)){
+  # plot results, but with no limit based on the highest/lowest t-statistic
+  png(paste(i,"zenith_results.png"), width = 800, height = 1000, res = 100)
+  plot1 <- plotZenithResults(df[[i]], 5, 1)
+  grid.arrange(plot1)
+  dev.off()
+}
+
+###############################
+#Remove ribosomal genes and rerun dreamlet with and without nfeature
+###############################
+pb_adult_dreamlet_remvd_genes <- pb_adult_dreamlet[-grep("RPL",rownames(pb_adult_dreamlet)),]
+pb_adult_dreamlet_remvd_genes <- pb_adult_dreamlet_remvd_genes[-grep("MT-",rownames(pb_adult_dreamlet_remvd_genes)),]
+pb_adult_dreamlet_remvd_genes <- pb_adult_dreamlet_remvd_genes[-grep("RPS",rownames(pb_adult_dreamlet_remvd_genes)),]
+
+form <- ~CNV +bulk_RIN+(1|Region) + (1 | HBCC_BrNum) + (1 | Match_group)
+res.proc_defaults_bulkrin = processAssays(pb_adult_dreamlet_remvd_genes, form, min.cells=0)
+saveRDS(res.proc_defaults_bulkrin,"/gpfs/gsfs12/users/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/~CNV+bulkRIN+(1|Region)+(1|HBCC_BrNum)+(1|Match_group)/res.proc_defaults_bulkrin")
+
+res.dl_defaults_bulkrin <- dreamlet(res.proc_defaults_bulkrin, form)
+res.dl_defaults_bulkrin <- readRDS("/gpfs/gsfs12/users/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/~CNV+bulkRIN+(1|Region)+(1|HBCC_BrNum)+(1|Match_group)/res.dl_defaults_bulkrin")
+
+res_zenith<- list()
+for(i in coefNames(res.dl_defaults_bulkrin)[2:13]){
+  res_zenith[[i]] = zenith_gsa(res.dl_defaults_bulkrin, coef = paste(i), go.gs)
+}
+
+df <- list()
+for(i in names(res_zenith)){
+  # get genesets with FDR < 5%
+  gs = unique(res_zenith[[i]]$Geneset[res_zenith[[i]]$FDR < 0.1])
+  # keep only results of these genesets 
+  df[[i]] = res_zenith[[i]][res_zenith[[i]]$Geneset %in% gs,]
+  # plot results, but with no limit based on the highest/lowest t-statistic
+}
+
+for(i in names(df)){
+  # plot results, but with no limit based on the highest/lowest t-statistic
+  png(paste(i,"zenith_results.png"), width = 800, height = 1000, res = 100)
+  plot1 <- plotZenithResults(df[[i]], 5, 1)
+  grid.arrange(plot1)
+  dev.off()
+}
+
+#############################################################################
+#Adding in technical covariates 
+#############################################################################
+pb_adult_dreamlet_remvd_genes$nfeature <- nfeatures$mean.nfeature[match(colnames(pb_adult_dreamlet_remvd_genes),nfeatures$orig.ident)]
+pb_adult_dreamlet_remvd_genes$CNV <-  relevel(factor(pb_adult_dreamlet_remvd_genes$CNV), ref= "non-carrier")
+#Adding in bulk_rin and nfeature
+form <- ~CNV+bulk_RIN+nfeature+(1|Region) +(1|Match_group) +(1|HBCC_BrNum)
+res.proc_bulkRINnfeat_remvd_genes = processAssays(pb_adult_dreamlet_remvd_genes, form, min.cells = 0)
+saveRDS(res.proc_bulkRINnfeat_remvd_genes,"/data/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/~CNV+bulk_RIN+nfeature+(1|Region)+(1|HBCC_BrNum)+(1|Match_group)/res.proc_bulkRINnfeat_remvd_genes")
+
+# Differential expression analysis within each assay,
+# evaluated on the voom normalized data 
+res.dl_bulkRINnfeat_remvd_genes = dreamlet(res.proc_bulkRINnfeat_remvd_genes, form)
+res.dl_bulkRINnfeat_remvd_genes<- readRDS("/data/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/~CNV+bulk_RIN+nfeature+(1|Region)+(1|HBCC_BrNum)+(1|Match_group)/res.dl_bulkRINnfeat_remvd_genes")
+
+res_zenith<- list()
+for(i in coefNames(res.dl_bulkRINnfeat_remvd_genes)[2:11]){
+  res_zenith[[i]] = zenith_gsa(res.dl_bulkRINnfeat_remvd_genes, coef = paste(i), go.gs, use.ranks=TRUE)
+}
+
+saveRDS(res_zenith,"/data/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/~CNV+bulk_RIN+nfeature+(1|Region)+(1|HBCC_BrNum)+(1|Match_group)/res_zenith")
+
+df <- list()
+for(i in names(res_zenith)){
+  # get genesets with FDR < 5%
+  gs = unique(res_zenith[[i]]$Geneset[res_zenith[[i]]$FDR < 0.1])
+  # keep only results of these genesets 
+  df[[i]] = res_zenith[[i]][res_zenith[[i]]$Geneset %in% gs,]
+  # plot results, but with no limit based on the highest/lowest t-statistic
+}
+names(df)
+i <- "CNV7q11.23 WBS del"
+for(i in names(df)){
+  # plot results, but with no limit based on the highest/lowest t-statistic
+  png(paste(i,"zenith_results.png"), width = 800, height = 1000, res = 100)
+  plot1 <- plotZenithResults(df[[i]], 5, 1)
+  grid.arrange(plot1)
+  dev.off()
+}
+
+
+# results from full analysis
+genelistNCvsC_dreamlet<- list()
+for(i in names(res.dl_bulkRINnfeat_remvd_genes)){for(j in coefNames(res.dl_bulkRINnfeat_remvd_genes)[2:12]){
+  print(i)
+  genelistNCvsC_dreamlet[[i]][[j]] <- topTable(res.dl_bulkRINnfeat_remvd_genes[[paste(i)]], coef = j, number = Inf)
+}}
+
+Genes_inCNVregions <- readRDS("~/Genes_inCNVregions")
+dreamlet_CNVgenes <- list(Genes_inCNVregions$HBCC_6_15q11del,Genes_inCNVregions$HBCC_6_15q11del,Genes_inCNVregions$HBCC_2_16p11del,Genes_inCNVregions$HBCC_8_16p11dup,Genes_inCNVregions$HBCC_1_1q21del,Genes_inCNVregions$HBCC_2_1q21dup,Genes_inCNVregions$SMRI_2_22q11del,Genes_inCNVregions$SMRI_3_22q11dup,Genes_inCNVregions$UMB_2_7q11del)
+names(dreamlet_CNVgenes) <- names(genelistNCvsC_dreamlet$Astrocyte)
+
+for (i in names(genelistNCvsC_dreamlet)){for (j in names(genelistNCvsC_dreamlet[[i]])){
+  genelistNCvsC_dreamlet[[i]][[paste(j)]]$diffexpressed <- "NO"
+  # if log2Foldchange > 0.2 and pvalue < 0.05, set as "UP" 
+  genelistNCvsC_dreamlet[[i]][[j]]$diffexpressed[genelistNCvsC_dreamlet[[i]][[j]]$logFC > 0 & genelistNCvsC_dreamlet[[i]][[j]]$P.Value < 0.05] <- "UP"
+  # if log2Foldchange < -0.2 and pvalue < 0.05, set as "DOWN"
+  genelistNCvsC_dreamlet[[i]][[j]]$diffexpressed[genelistNCvsC_dreamlet[[i]][[j]]$logFC < 0 & genelistNCvsC_dreamlet[[i]][[j]]$P.Value < 0.05] <- "DOWN"
+  genelistNCvsC_dreamlet[[i]][[j]]$CNVgene <- 'FALSE'
+  genelistNCvsC_dreamlet[[i]][[j]]$CNVgene[rownames(genelistNCvsC_dreamlet[[i]][[j]]) %in% dreamlet_CNVgenes[[j]]$Gene.name] <- 'TRUE'
+}}
+
+for (i in names(genelistNCvsC_dreamlet)){for (j in names(genelistNCvsC_dreamlet[[i]])){
+  genelistNCvsC_dreamlet[[i]][[paste(j)]]$diffexpressed <- "NO"
+  # if log2Foldchange > 0.2 and pvalue < 0.05, set as "UP" 
+  genelistNCvsC_dreamlet[[i]][[j]]$diffexpressed[genelistNCvsC_dreamlet[[i]][[j]]$logFC > 0 & genelistNCvsC_dreamlet[[i]][[j]]$P.Value < 0.05] <- "UP"
+  # if log2Foldchange < -0.2 and pvalue < 0.05, set as "DOWN"
+  genelistNCvsC_dreamlet[[i]][[j]]$diffexpressed[genelistNCvsC_dreamlet[[i]][[j]]$logFC < 0 & genelistNCvsC_dreamlet[[i]][[j]]$P.Value < 0.05] <- "DOWN"
+  genelistNCvsC_dreamlet[[i]][[j]]$CNVgene <- 'FALSE'
+  genelistNCvsC_dreamlet[[i]][[j]]$CNVgene[rownames(genelistNCvsC_dreamlet[[i]][[j]]) %in% dreamlet_CNVgenes[[j]]$Gene.name] <- 'TRUE'
+}
+}
+
+for(i in names(genelistNCvsC_dreamlet)){for(j in names(genelistNCvsC_dreamlet[[i]])){
+  genelistNCvsC_dreamlet[[i]][[j]]$fdr_0.5 <- 'FALSE'
+  genelistNCvsC_dreamlet[[i]][[j]]$fdr_0.5[genelistNCvsC_dreamlet[[i]][[j]]$adj.P.Val <0.5] <- 'TRUE'
+  genelistNCvsC_dreamlet[[i]][[j]]$fdr_0.1 <- 'FALSE'
+  genelistNCvsC_dreamlet[[i]][[j]]$fdr_0.1[genelistNCvsC_dreamlet[[i]][[j]]$adj.P.Val <0.1] <- 'TRUE'
+  genelistNCvsC_dreamlet[[i]][[j]]$fdr_0.2 <- 'FALSE'
+  genelistNCvsC_dreamlet[[i]][[j]]$fdr_0.2[genelistNCvsC_dreamlet[[i]][[j]]$adj.P.Val <0.2] <- 'TRUE'
+}}
+
+for (i in names(genelistNCvsC_dreamlet)){for(j in names(genelistNCvsC_dreamlet[[i]])){
+  genelistNCvsC_dreamlet[[i]][[j]]$gene.name <- rownames(genelistNCvsC_dreamlet[[i]][[j]])
+}}
+
+library(tidyr)
+DEG_dream <- list()
+DEG_count<- list()
+for (i in names(genelistNCvsC_dreamlet)){for(j in names(genelistNCvsC_dreamlet[[i]])){
+  print(i)
+  print(j)
+  DEG_dream[[i]][[j]] <- subset(genelistNCvsC_dreamlet[[i]][[j]], diffexpressed != "NO")
+  DEG_dream[[i]][[j]]$Key <- paste(DEG_dream[[i]][[j]]$diffexpressed,DEG_dream[[i]][[j]]$fdr_0.1, sep = "_")
+  DEG_dream[[i]][[j]] <- DEG_dream[[i]][[j]] %>%
+    dplyr::group_by(Key)%>%
+    dplyr::count()
+  DEG_dream[[i]][[j]]$Celltype <- i
+  DEG_dream[[i]][[j]]$group <-j
+}
+  DEG_count[[i]] <- do.call(rbind, Map(data.frame, DEG_dream[[i]]))
+}
+
+DEG_dream_merge <- do.call(rbind, Map(data.frame,DEG_count))
+library(plyr)
+DEG_dream_merge$Key <- revalue(DEG_dream_merge$Key, c("DOWN_FALSE"="Downregulated", "DOWN_TRUE"="Downregulated (FDR <0.1)","UP_FALSE" ="Upregulated","UP_TRUE"="Upregulated (FDR<0.1)"))
+DEG_dream_merge$Celltype <- revalue(DEG_dream_merge$Celltype, c("Inhibitory_CGE"="CGE-Derived Inhibitory Neurons", "Inhibitory_MGE"="MGE-Derived Inhibitory Neurons","L2_3Excitatory" ="Upper Layer Excitatory Neurons","L5_6Excitatory"="Lower Layer Excitatory Neurons"))
+dput(levels(as.factor(DEG_dream_merge$Celltype)))
+DEG_dream_merge$Celltype <- factor(DEG_dream_merge$Celltype,levels = c("VLMC_Endo", "OPC", "Oligodendrocytes", "Microglia", "Astrocyte", "Upper Layer Excitatory Neurons", "Lower Layer Excitatory Neurons", "MGE-Derived Inhibitory Neurons", "CGE-Derived Inhibitory Neurons"))
+dput(levels(as.factor(DEG_dream_merge$group)))
+DEG_dream_merge$group <- factor(DEG_dream_merge$group,levels = c("CNV22q11.2 del", "CNV22q11.2 dup","CNV16p11.2 del", "CNV16p11.2 dup", "CNV7q11.23 WBS del","CNV1q21.1 del", "CNV1q21.1 dup","CNV15q11.2 BP1-2 del", "CNV15q11.2 BP1-2 dup"))
+dput(levels(as.factor(DEG_dream_merge$Key)))
+
+library(ggplot2)
+png("dreamlet_barplot_FDR_allCNVs_order.png", width = 3500, height = 1550, res = 250)
+ggplot2::ggplot(data = DEG_dream_merge, aes(Celltype, n, fill = Key)) +
+  geom_bar(position = "stack", stat="identity")+
+  scale_fill_manual(values=c("firebrick1","firebrick3","dodgerblue","dodgerblue4"))+
+  labs(subtitle = "~CNV+(1|Region)+(1|MG)+(1|HBCC_BrNum)",
+       y = "Count of DEGs") + 
+  coord_flip()+
+  facet_wrap(~ group,ncol=4)+
+  theme_cowplot()+
+  theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust=0.5))
+dev.off()
+
+
+DEG_22q11 <- subset(DEG_dream_merge,group %in% c("CNV22q11.2 del"))
+library(cowplot)
+png("dreamlet_barplot_FDR_22q11del.png", width = 1000, height = 600, res = 100)
+ggplot2::ggplot(data = DEG_22q11, aes(Celltype, n, fill = Key)) +
+  geom_bar(position = "stack", stat="identity")+
+  scale_fill_manual(values=c("dodgerblue","dodgerblue4","firebrick1","firebrick3"))+
+  labs(subtitle = "~CNV+(1|Region)+(1|MG)+(1|HBCC_BrNum)",
+       y = "Count of DEGs") + 
+  coord_flip()+
+  facet_wrap(~ group,ncol=2)+
+  theme_cowplot()+
+  theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust=0.5))
+dev.off()
+
+DEG_dream_merge$group
+DEG_7q11 <- subset(DEG_dream_merge,group %in% c("CNV7q11.23 WBS del"))
+library(cowplot)
+png("dreamlet_barplot_FDR_7q11.png", width = 1000, height = 600, res = 100)
+ggplot2::ggplot(data = DEG_7q11, aes(Celltype, n, fill = Key)) +
+  geom_bar(position = "stack", stat="identity")+
+  scale_fill_manual(values=c("dodgerblue","dodgerblue4","firebrick1","firebrick3"))+
+  labs(subtitle = "~CNV+(1|Region)+(1|MG)+(1|HBCC_BrNum)",
+       y = "Count of DEGs") + 
+  coord_flip()+
+  facet_wrap(~ group,ncol=2)+
+  theme_cowplot()+
+  theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust=0.5))
+dev.off()
+
+saveRDS(genelistNCvsC_dreamlet,"/data/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/~CNV+bulk_RIN+nfeature+(1|Region)+(1|HBCC_BrNum)+(1|Match_group)/genelistNCvsC_dreamlet")
+
+original_gene_list<- list()
+gene_list<- list()
+for(i in names(genelistNCvsC_dreamlet)){for(j in names(genelistNCvsC_dreamlet[[i]])){
+  # we want the log2 fold change
+  original_gene_list[[i]][[j]] <- genelistNCvsC_dreamlet[[i]][[j]]$t
+  # name the vector
+  names(original_gene_list[[i]][[j]]) <- rownames(genelistNCvsC_dreamlet[[i]][[j]])
+  # omit any NA values 
+  gene_list[[i]][[j]]<-na.omit(original_gene_list[[i]][[j]])
+  #sort the list in decreasing order (required for clusterProfiler)
+  gene_list[[i]][[j]] = sort(gene_list[[i]][[j]], decreasing= TRUE)
+}}
+
+library(fgsea)
+library(data.table)
+library(ggplot2)
+go.gs = get_GeneOntology(to="SYMBOL")
+fgseaRes<- list()
+data("examplePathways")
+GO_terms <- list()
+for(i in 1:length(go.gs)){
+  GO_terms[[i]] <- go.gs[[i]]@geneIds
+}
+names(GO_terms) <- names(go.gs)
+
+library(fgsea)
+fgseaRes<- list()
+for(i in names(gene_list)){for(j in names(gene_list[[i]])){
+  fgseaRes[[i]][[j]] <- fgsea(pathways = GO_terms, stats    = gene_list[[i]][[j]],eps = 0.0,minSize = 15,maxSize  = 500)
+}}
+
+saveRDS(fgseaRes,"/data/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/~CNV+bulk_RIN+nfeature+(1|Region)+(1|HBCC_BrNum)+(1|Match_group)/fgseaRes")
+
+#FDR <0.05 & Grouping enrichments by CNV
+FDR_sig_fgsea<- list()
+for(i in names(fgseaRes)){for(j in names(fgseaRes[[i]])){
+  FDR_sig_fgsea[[i]][[j]] <-subset(fgseaRes[[i]][[j]],padj <0.05)
+}}
+fgsea_refrmt <- list()
+for(i in names(fgseaRes$Astrocyte)){
+  fgsea_refrmt[[i]] <- list(fgseaRes$Inhibitory_CGE[[paste(i)]],fgseaRes$Inhibitory_MGE[[paste(i)]],fgseaRes$L2_3Excitatory[[paste(i)]],fgseaRes$L5_6Excitatory[[paste(i)]],fgseaRes$Astrocyte[[paste(i)]],fgseaRes$Microglia[[paste(i)]],fgseaRes$Oligodendrocytes[[paste(i)]],fgseaRes$OPC[[paste(i)]],fgseaRes$VLMC_Endo[[paste(i)]])
+  names(fgsea_refrmt[[i]]) <- names(fgseaRes)
+}
+
+FDR_sig_fgsea_refrmt <- list()
+for(i in names(FDR_sig_fgsea$Astrocyte)){
+  FDR_sig_fgsea_refrmt[[i]] <- list(FDR_sig_fgsea$Inhibitory_CGE[[paste(i)]],FDR_sig_fgsea$Inhibitory_MGE[[paste(i)]],FDR_sig_fgsea$L2_3Excitatory[[paste(i)]],FDR_sig_fgsea$L5_6Excitatory[[paste(i)]],FDR_sig_fgsea$Astrocyte[[paste(i)]],FDR_sig_fgsea$Microglia[[paste(i)]],FDR_sig_fgsea$Oligodendrocytes[[paste(i)]],FDR_sig_fgsea$OPC[[paste(i)]],FDR_sig_fgsea$VLMC_Endo[[paste(i)]])
+  names(FDR_sig_fgsea_refrmt[[i]]) <- names(FDR_sig_fgsea)
+}
+combine_df_CNV<- list()
+FDR_sig_fgsea_drop<- list()
+for(i in names(FDR_sig_fgsea_refrmt)){for(j in names(FDR_sig_fgsea_refrmt[[i]])){
+  FDR_sig_fgsea_refrmt[[i]][[j]]$celltype <- paste(j) 
+  FDR_sig_fgsea_refrmt[[i]][[j]]$CNV <- paste(i) 
+  FDR_sig_fgsea_refrmt[[i]][[j]]$CNV <- sub(".*CNV" ,"",FDR_sig_fgsea_refrmt[[i]][[j]]$CNV)
+  FDR_sig_fgsea_refrmt[[i]][[j]]$celltype<- revalue(FDR_sig_fgsea_refrmt[[i]][[j]]$celltype, c("Inhibitory_CGE"="CGE-Derived Inhibitory Neurons", "Inhibitory_MGE"="MGE-Derived Inhibitory Neurons","L2_3Excitatory" ="Upper Layer Excitatory Neurons","L5_6Excitatory"="Lower Layer Excitatory Neurons"))
+}
+  FDR_sig_fgsea_drop[[i]] <- list_drop_empty(FDR_sig_fgsea_refrmt[[i]])
+  combine_df_CNV[[i]] <- Reduce(rbind,FDR_sig_fgsea_drop[[i]])
+}
+
+combine_df_bp <- list()
+for(i in names(FDR_sig_fgsea_refrmt)){for(j in names(FDR_sig_fgsea_refrmt[[i]])){
+  GO_ID_full <- sub(":.*","", FDR_sig_fgsea_refrmt[[i]][[j]]$pathway)
+  GO_ID <- sub(".*GO","", GO_ID_full)
+  GO_ID_edit <- paste("GO:", GO_ID, sep = "")
+  FDR_sig_fgsea_refrmt[[i]][[j]]$GO_ID <- GO_ID_edit
+  combine_df_bp[[i]][[j]] <- FDR_sig_fgsea_refrmt[[i]][[j]][FDR_sig_fgsea_refrmt[[i]][[j]]$GO_ID %in% df_bp$GOID,]
+}}
+
+fgseaRes_merge<- list()
+for(i in names(fgsea_refrmt)){for(j in names(fgsea_refrmt[[i]])){
+  fgsea_refrmt[[i]][[j]]$Celltype <- j
+  fgsea_refrmt[[i]][[j]]$CNV <- i
+  fgsea_refrmt[[i]][[j]]$CNV <- sub(".*CNV" ,"",fgsea_refrmt[[i]][[j]]$CNV)
+  fgsea_refrmt[[i]][[j]]$celltype<- revalue(fgsea_refrmt[[i]][[j]]$celltype, c("Inhibitory_CGE"="CGE-Derived Inhibitory Neurons", "Inhibitory_MGE"="MGE-Derived Inhibitory Neurons","L2_3Excitatory" ="Upper Layer Excitatory Neurons","L5_6Excitatory"="Lower Layer Excitatory Neurons"))
+}
+  fgseaRes_merge[[i]] <- Reduce(rbind, fgsea_refrmt[[i]])
+}
+
+topterms<- list()
+topterms_mergeCNV<- list()
+for(i in names(combine_df_bp)){for(j in names(combine_df_bp[[i]])){
+  topterms[[i]][[j]]<- combine_df_bp[[i]][[j]][order(combine_df_bp[[i]][[j]]$padj, decreasing = FALSE),][1:5,]
+}
+  topterms_mergeCNV[[i]] <- Reduce(rbind,topterms[[i]])
+}
+topterms_new <- Reduce(rbind,topterms_mergeCNV)
+topterms_unique <- unique(topterms_new$pathway)
+
+fgseaRes_merge_cd <- list()
+for(i in names(fgseaRes_merge)){
+  fgseaRes_merge_cd[[i]] <- fgseaRes_merge[[i]][fgseaRes_merge[[i]]$pathway %in% unique(topterms_mergeCNV[[i]]$pathway),]
+}
+
+fgseaRes_merge_cd_full <- Reduce(rbind,fgseaRes_merge_cd)
+
+dput(levels(factor(fgseaRes_merge_cd_full$Celltype)))
+fgseaRes_merge_cd_full$CNV<- factor(fgseaRes_merge_cd_full$CNV,levels = c("22q11.2 del", "22q11.2 dup","16p11.2 del", "16p11.2 dup","15q11.2 BP1-2 del", "15q11.2 BP1-2 dup", "1q21.1 del", "1q21.1 dup", "7q11.23 WBS del"))
+fgseaRes_merge_cd_full$Celltype<- revalue(fgseaRes_merge_cd_full$Celltype, c("Inhibitory_CGE"="CGE-Derived Inhibitory Neurons", "Inhibitory_MGE"="MGE-Derived Inhibitory Neurons","L2_3Excitatory" ="Upper Layer Excitatory Neurons","L5_6Excitatory"="Lower Layer Excitatory Neurons"))
+fgseaRes_merge_cd_full$Celltype<-  factor(fgseaRes_merge_cd_full$Celltype,levels = rev(c("VLMC_Endo", "OPC", "Oligodendrocytes", "Microglia", "Astrocyte", "Upper Layer Excitatory Neurons", "Lower Layer Excitatory Neurons", "MGE-Derived Inhibitory Neurons", "CGE-Derived Inhibitory Neurons")))
+fgseaRes_merge_cd_full$FDR_Sig <- ""
+fgseaRes_merge_cd_full$FDR_Sig[fgseaRes_merge_cd_full$padj <=0.1] <- "*"
+fgseaRes_merge_cd_full$FDR_Sig[fgseaRes_merge_cd_full$padj <=0.01] <- "**"
+fgseaRes_merge_cd_full$FDR_Sig[fgseaRes_merge_cd_full$padj <=0.001] <- "***"
+fgseaRes_merge_cd_full$CNVGroup <- fgseaRes_merge_cd_full$CNV
+fgseaRes_merge_cd_full$CNVGroup <- sub(" del.*","",fgseaRes_merge_cd_full$CNVGroup)
+fgseaRes_merge_cd_full$CNVGroup <- sub(" dup.*","",fgseaRes_merge_cd_full$CNVGroup)
+fgseaRes_merge_cd_full$Description <- sub(".*:","",fgseaRes_merge_cd_full$pathway)
+fgseaRes_merge_cd_full$CNVType <- "Deletion"
+fgseaRes_merge_cd_full$CNVType[grepl("dup",fgseaRes_merge_cd_full$CNV)] <- "Duplication"
+fgseaRes_merge_cd_full$CNVGroup<- factor(fgseaRes_merge_cd_full$CNVGroup,levels = c( "22q11.2","16p11.2","15q11.2 BP1-2", "1q21.1", "7q11.23 WBS"
+))
+fgseaRes_merge_cd_full$CNVGroup<- as.factor(fgseaRes_merge_cd_full$CNVGroup)
+
+png("fgsea_heatmap_FDR005_diffCNV_top5_split.png", width = 4300, height = 3300, res =130)
+ggplot(fgseaRes_merge_cd_full, aes(x=Celltype, y= Description, fill =NES)) +
+  geom_tile()+
+  facet_wrap(~CNV, scales = "free", drop = TRUE)+
+  geom_text(label = fgseaRes_merge_cd_full$FDR_Sig)+
+  theme_cowplot()+
+  scale_fill_gradient2(low = "blue", mid = "white",high = "red")+
+  scale_x_discrete(labels = function(x) str_wrap(x, width = 5))+
+  theme(axis.text.x = element_text(angle = 60, hjust=1))
+dev.off()
+
+
+#LogFC
+original_gene_list<- list()
+gene_list<- list()
+for(i in names(genelistNCvsC_dreamlet)){for(j in names(genelistNCvsC_dreamlet[[i]])){
+  # we want the log2 fold change
+  original_gene_list[[i]][[j]] <- genelistNCvsC_dreamlet[[i]][[j]]$logFC
+  # name the vector
+  names(original_gene_list[[i]][[j]]) <- rownames(genelistNCvsC_dreamlet[[i]][[j]])
+  # omit any NA values 
+  gene_list[[i]][[j]]<-na.omit(original_gene_list[[i]][[j]])
+  #sort the list in decreasing order (required for clusterProfiler)
+  gene_list[[i]][[j]] = sort(gene_list[[i]][[j]], decreasing= TRUE)
+}}
+
+library(fgsea)
+library(data.table)
+library(ggplot2)
+go.gs = get_GeneOntology(to="SYMBOL")
+fgseaRes<- list()
+data("examplePathways")
+GO_terms <- list()
+for(i in 1:length(go.gs)){
+  GO_terms[[i]] <- go.gs[[i]]@geneIds
+}
+names(GO_terms) <- names(go.gs)
+
+library(fgsea)
+fgseaRes<- list()
+for(i in names(gene_list)){for(j in names(gene_list[[i]])){
+  fgseaRes[[i]][[j]] <- fgsea(pathways = GO_terms, stats    = gene_list[[i]][[j]],eps = 0.0,minSize = 15,maxSize  = 500)
+}}
+
+saveRDS(fgseaRes,"/data/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/~CNV+bulk_RIN+nfeature+(1|Region)+(1|HBCC_BrNum)+(1|Match_group)/fgseaRes_logFC")
+###############################################################
+#Exploring separate 7q11.23 Matchgroups 
+###############################################################
+
+pb_adult_dreamlet_remvd_genes<- readRDS("/data/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/Removed_MT_RiboGenes/pb_adult_dreamlet_remvd_genes")
+
+pb_7q11 <- pb_adult_dreamlet_remvd_genes[,pb_adult_dreamlet_remvd_genes$Match_group %in% c("UMB_2","UMB_3")]
+pb_7q11<- split(pb_7q11,pb_7q11$Match_group)
+
+form <- ~CNV + (1|Region) + (1 | HBCC_BrNum) 
+# Normalize and apply voom/voomWithDreamWeights
+res.proc_7q11 <- list()
+for(i in names(pb_7q11)){
+  res.proc_7q11[[i]] = processAssays(pb_7q11[[i]], form, min.cells=0)
+}
+saveRDS(res.proc_7q11,"/data/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/Removed_MT_RiboGenes/~CNV+(1|Region)+(1|Match_group)+(1|HBCC_BrNum)/CNV7q11_AdultGroup/res.proc_7q11")
+res.dl_7q11<- list()
+for(i in names(res.proc_7q11)){
+  res.dl_7q11[[i]] <- dreamlet(res.proc_7q11[[i]], form)
+}
+saveRDS(res.dl_7q11,"/data/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022order/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/Removed_MT_RiboGenes/~CNV+(1|Region)+(1|Match_group)+(1|HBCC_BrNum)/CNV7q11_AdultGroup/res.dl_7q11")
+
+
+library(zenith)
+go.gs = get_GeneOntology(to="SYMBOL")
+
+res_zenith<- list()
+for(i in names(res.dl_7q11)){for(j in coefNames(res.dl_7q11[[i]])[2]){
+  res_zenith[[i]][[j]] = zenith_gsa(res.dl_7q11[[i]], coef = paste(j), go.gs)
+}}
+res_zenith<- readRDS("/data/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/Removed_MT_RiboGenes/~CNV+(1|Region)+(1|Match_group)+(1|HBCC_BrNum)/CNV7q11_AdultGroup/res_zenith")
+
+df <- list()
+for(i in names(res_zenith)){for(j in names(res_zenith[[i]])){
+  # get genesets with FDR < 10%
+  gs = unique(res_zenith[[i]][[j]]$Geneset[res_zenith[[i]][[j]]$FDR < 0.1])
+  # keep only results of these genesets 
+  df[[i]][[j]] = res_zenith[[i]][[j]][res_zenith[[i]][[j]]$Geneset %in% gs,]
+}}
+library(dplyr)
+library(plyr)
+for(i in names(df)){
+  df[[i]]$`CNV7q11.23 WBS del`$assay <- revalue(df[[i]]$`CNV7q11.23 WBS del`$assay, c("Inhibitory_CGE"="CGE-Derived Inhibitory Neurons", "Inhibitory_MGE"="MGE-Derived Inhibitory Neurons","L2_3Excitatory" ="Lower Excitatory Neurons","L5_6Excitatory"="Upper Excitatory Neurons"))
+  df[[i]]$`CNV7q11.23 WBS del`$assay <- factor(df[[i]]$`CNV7q11.23 WBS del`$assay,levels = rev(c("VLMC_Endo", "OPC", "Oligodendrocytes", "Microglia", "Astrocyte", "Upper Excitatory Neurons", "Lower Excitatory Neurons", "MGE-Derived Inhibitory Neurons", "CGE-Derived Inhibitory Neurons")))
+}
+library(zenith)
+library(gridExtra)
+i <- "UMB_3"
+
+png(paste(i,j,"7q11Zenith.png"), height = 1000, width =950, res =95)
+plot1 <- plotZenithResults(df[[i]]$`CNV7q11.23 WBS del`)+
+  ggtitle(paste(i,"7q11.23 Deletion, GO Enrichments"))
+grid.arrange(plot1)
+dev.off()
+
+################################################################
+#Running dreamlet on cell class 
+################################################################
+library(SingleCellExperiment)
+snCNV_spx_nd_adult_MG_fc_MG_fc_MG <- readRDS("/gpfs/gsfs12/users/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/snCNV_spx_nd_adult_MG_fc_MG_fc_MG")
+table(snCNV_spx_nd_adult_MG_fc_MG_fc_MG$orig.ident)
+sce <- as.SingleCellExperiment(snCNV_spx_nd_adult_MG_fc_MG_fc_MG)
+gc()
+sce <- sce[,-grep("Sample_30", colnames(sce))]
+rm(snCNV_spx_nd_adult_MG_fc_MG_fc_MG)
+table(sce$cell.class.annotation)
+
+pb_class <- aggregateToPseudoBulk(sce,
+                            assay = "counts",     
+                            cluster_id = "cell.class.annotation",  
+                            sample_id = "orig.ident", 
+                            BPPARAM = SnowParam(6, progressbar=TRUE))
+pb_class <- pb_class[-grep("RPL",rownames(pb_class)),]
+pb_class <- pb_class[-grep("MT-",rownames(pb_class)),]
+pb_class <- pb_class[-grep("RPS",rownames(pb_class)),]
+pb_class$CNV <-  relevel(factor(pb_class$CNV), ref= "non-carrier")
+form <- ~CNV + (1|Region) + (1 | HBCC_BrNum) + (1 | Match_group)
+# Normalize and apply voom/voomWithDreamWeights
+res.proc_class = processAssays( pb_class, form)
+saveRDS(res.proc_class,"/data/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/Removed_MT_RiboGenes/Pseudobulking_CellClass/res.proc_class")
+data.frame.counts.remvdgenes <- list()
+for(i in names(res.proc_class)){
+  data.frame.counts.remvdgenes[[i]]$Number.of.Genes <- nrow(res.proc_class[[i]])
+  data.frame.counts.remvdgenes[[i]]$Cell.Type <- i
+  data.frame.counts.remvdgenes[[i]]$Filtering <- "Dreamlet Default Settings"
+}
+
+data.frame_counts <- do.call(rbind, Map(data.frame, data.frame.counts.remvdgenes))
+
+library(ggplot2)
+png("barplot_defaultfiltering.png", res = 90, width = 900)
+plot1 <- ggplot(data.frame_counts,aes(x=Number.of.Genes, y = Cell.Type, fill=Cell.Type))+
+  geom_bar(stat="identity", position=position_dodge())+
+  labs(title ="Dreamlet Number of Genes By Cell Class",subtitle = "Default Settings") + 
+  theme_cowplot()+
+  theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust=0.5))+
+  geom_text(aes(label=Number.of.Genes, color = Cell.Type), position=position_dodge(width=0.9), vjust=0.5, hjust = 0)+
+  xlim(0,25000)+
+  scale_linetype_manual(guide = guide_legend(reverse = TRUE) )
+grid.arrange(plot1)
+dev.off()
+
+res.dl_class = dreamlet(res.proc_class, form)
+saveRDS(res.dl_class,"/data/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/Removed_MT_RiboGenes/Pseudobulking_CellClass/res.dl_class")
+
+res_zenith<- list()
+for(i in coefNames(res.dl_class)[2:11]){
+  res_zenith[[i]] = zenith_gsa(res.dl_class, coef = paste(i), go.gs, use.ranks=TRUE)
+}
+
+saveRDS(res_zenith,"/data/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/Removed_MT_RiboGenes/Pseudobulking_CellClass/res_zenith")
+
+df <- list()
+for(i in names(res_zenith)){
+  # get genesets with FDR < 5%
+  gs = unique(res_zenith[[i]]$Geneset[res_zenith[[i]]$FDR < 0.1])
+  # keep only results of these genesets 
+  df[[i]] = res_zenith[[i]][res_zenith[[i]]$Geneset %in% gs,]
+  # plot results, but with no limit based on the highest/lowest t-statistic
+}
+
+names(df)
+for(i in names(df)){
+  # plot results, but with no limit based on the highest/lowest t-statistic
+  png(paste(i,"zenith_results.png"), width = 800, height = 1000, res = 100)
+  plot1 <- plotZenithResults(df[[i]])
+  grid.arrange(plot1)
+  dev.off()
+}
+genelistNCvsC_dreamlet<- list()
+for(i in names(res.dl_class)){for(j in coefNames(res.dl_class)[2:10]){
+  print(i)
+  genelistNCvsC_dreamlet[[i]][[j]] <- topTable(res.dl_class[[paste(i)]], coef = j, number = Inf)
+}}
+
+DEG_dream <- list()
+DEG_count<- list()
+for (i in names(genelistNCvsC_dreamlet)){for(j in names(genelistNCvsC_dreamlet[[i]])){
+  print(i)
+  print(j)
+  DEG_dream[[i]][[j]] <- subset(genelistNCvsC_dreamlet[[i]][[j]], diffexpressed != "NO")
+  DEG_dream[[i]][[j]]$Key <- paste(DEG_dream[[i]][[j]]$diffexpressed,DEG_dream[[i]][[j]]$fdr_0.1, sep = "_")
+  DEG_dream[[i]][[j]] <- DEG_dream[[i]][[j]] %>%
+    dplyr::group_by(Key)%>%
+    dplyr::count()
+  DEG_dream[[i]][[j]]$celltype <- i
+  DEG_dream[[i]][[j]]$group <-j
+}
+  DEG_count[[i]] <- do.call(rbind, Map(data.frame, DEG_dream[[i]]))
+}
+
+DEG_dream_merge <- do.call(rbind, Map(data.frame,DEG_count))
+library(plyr)
+DEG_dream_merge$Key <- revalue(DEG_dream_merge$Key, c("DOWN_FALSE"="Downregulated", "DOWN_TRUE"="Downregulated (FDR <0.1)","UP_FALSE" ="Upregulated","UP_TRUE"="Upregulated (FDR<0.1)"))
+dput(levels(as.factor(DEG_dream_merge$group)))
+DEG_dream_merge$group <- factor(DEG_dream_merge$group,levels = c("CNV22q11.2 del", "CNV22q11.2 dup","CNV16p11.2 del", "CNV16p11.2 dup", "CNV7q11.23 WBS del","CNV1q21.1 del", "CNV1q21.1 dup","CNV15q11.2 BP1-2 del", "CNV15q11.2 BP1-2 dup"))
+library(ggplot2)
+png("dreamlet_barplot_FDR.png", width = 2500, height = 1300, res = 240)
+ggplot2::ggplot(data = DEG_dream_merge, aes(celltype, n, fill = Key)) +
+  geom_bar(position = "stack", stat="identity")+
+  scale_fill_manual(values=c("dodgerblue","dodgerblue4","firebrick1","firebrick3"))+
+  labs(title = "Dreamlet Results by CNV", subtitle = "~CNV+(1|Region)+(1|MG)+(1|HBCC_BrNum)",
+       y = "Count of DEGs") + 
+  coord_flip()+
+  facet_wrap(~ group,ncol=4)+
+  theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust=0.5))
+dev.off()
+
+################################################################
+#Running dreamlet including proportion of cell type per sample as covariate
+################################################################
+pb_adult_dreamlet_remvd_genes <- readRDS("/data/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/Removed_MT_RiboGenes/pb_adult_dreamlet_remvd_genes")
+nrow(pb_adult_dreamlet_remvd_genes@metadata$aggr_means)
+celltype_count<- readRDS("/data/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/celltype_count")
+celltype_count <- celltype_count[-grep("Sample_30", celltype_count$SampleID),]
+library(plyr)
+celltype_count$Cell.Type <- revalue(celltype_count$Cell.Type, c("CGE-Derived Inhibitory Neurons"="Inhibitory_CGE", "MGE-Derived Inhibitory Neurons"="Inhibitory_MGE","Upper Layer Excitatory Neurons"="L2_3Excitatory","Lower Layer Excitatory Neurons"="L5_6Excitatory"))
+
+pb_adult_dreamlet_remvd_genes@metadata$aggr_means$origident.celltype <- paste(pb_adult_dreamlet_remvd_genes@metadata$aggr_means$orig.ident,pb_adult_dreamlet_remvd_genes@metadata$aggr_means$subclass.annotation, sep = "_")
+celltype_count$origident.celltype<- paste(celltype_count$SampleID,celltype_count$Cell.Type, sep = "_")
+
+table(celltype_count$origident.celltype %in% pb_adult_dreamlet_remvd_genes@metadata$aggr_means$origident.celltype)
+
+pb_adult_dreamlet_remvd_genes@metadata$aggr_means$celltype.prop <- celltype_count$celltype_proportion[match(pb_adult_dreamlet_remvd_genes@metadata$aggr_means$origident.celltype,celltype_count$origident.celltype)]
+
+form <- ~CNV + celltype.prop+ (1|Region) + (1 | HBCC_BrNum) + (1 | Match_group)
+# Normalize and apply voom/voomWithDreamWeights
+res.proc_numberofcells = processAssays(pb_adult_dreamlet_remvd_genes, form)
+saveRDS(res.proc_numberofcells,"/data/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/Removed_MT_RiboGenes/Pseudobulking_CellClass/res.proc_numberofcells")
+data.frame.counts.remvdgenes <- list()
+for(i in names(res.proc_numberofcells)){
+  data.frame.counts.remvdgenes[[i]]$Number.of.Genes <- nrow(res.proc_numberofcells[[i]])
+  data.frame.counts.remvdgenes[[i]]$Cell.Type <- i
+  data.frame.counts.remvdgenes[[i]]$Filtering <- "Dreamlet Default Settings"
+}
+
+data.frame_counts <- do.call(rbind, Map(data.frame, data.frame.counts.remvdgenes))
+
+library(ggplot2)
+png("barplot_defaultfiltering.png", res = 90, width = 900)
+plot1 <- ggplot(data.frame_counts,aes(x=Number.of.Genes, y = Cell.Type, fill=Cell.Type))+
+  geom_bar(stat="identity", position=position_dodge())+
+  labs(title ="Dreamlet Number of Genes By Cell Class",subtitle = "Default Settings") + 
+  theme_cowplot()+
+  theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust=0.5))+
+  geom_text(aes(label=Number.of.Genes, color = Cell.Type), position=position_dodge(width=0.9), vjust=0.5, hjust = 0)+
+  xlim(0,25000)+
+  scale_linetype_manual(guide = guide_legend(reverse = TRUE) )
+grid.arrange(plot1)
+dev.off()
+
+res.dl_numberofcells = dreamlet(res.proc_numberofcells, form)
+res.dl_numberofcells<- readRDS("/data/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/Removed_MT_RiboGenes/~CNV+Number.of.Cells.Celltype +(1|Region)+(1|HBCC_BrNum)+(1|Match_group)/res.dl_numberofcells")
+
+res_zenith<- list()
+for(i in coefNames(res.dl_numberofcells)[2:12]){
+  res_zenith[[i]] = zenith_gsa(res.dl_numberofcells, coef = paste(i), go.gs)
+}
+
+saveRDS(res_zenith,"/data/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/Removed_MT_RiboGenes/~CNV+Number.of.Cells.Celltype +(1|Region)+(1|HBCC_BrNum)+(1|Match_group)/res_zenith")
+
+df <- list()
+for(i in names(res_zenith)){
+  # get genesets with FDR < 5%
+  gs = unique(res_zenith[[i]]$Geneset[res_zenith[[i]]$FDR < 0.1])
+  # keep only results of these genesets 
+  df[[i]] = res_zenith[[i]][res_zenith[[i]]$Geneset %in% gs,]
+  # plot results, but with no limit based on the highest/lowest t-statistic
+}
+
+names(df)
+for(i in names(df)){
+  if(nrow(df[[i]])>0){
+  # plot results, but with no limit based on the highest/lowest t-statistic
+  png(paste(i,"zenith_results.png"), width = 800, height = 1000, res = 100)
+  plot1 <- plotZenithResults(df[[i]])+
+    labs(caption = "FDR <0.10 Terms, (FDR <0.05 *)")+
+    ggtitle(label = paste(i), subtitle = "~CNV + celltype.prop+ (1|Region) \n + (1 | HBCC_BrNum) + (1 | Match_group)")+
+    theme(plot.title = element_text(hjust = 0))
+  grid.arrange(plot1)
+  dev.off()
+  }
+}
+
+df <- list()
+for(i in names(res_zenith)){
+  # get genesets with FDR < 10%
+  gs = "GO0042775: mitochondrial ATP synthesis coupled electron transport"
+  # keep only results of these genesets 
+  df[[i]] = res_zenith[[i]][res_zenith[[i]]$Geneset %in% gs,]
+  # create t-statisitc 
+  df[[i]]$t = df[[i]]$delta/df[[i]]$se
+}
+
+df <- list()
+fgsea_celltype <- list()
+for(i in names(fgseaRes)){for(j in names(fgseaRes[[i]])){
+  # get genesets with FDR < 10%
+  gs = "GO0042775: mitochondrial ATP synthesis coupled electron transport"
+  # keep only results of these genesets 
+  df[[i]][[j]] = fgseaRes[[i]][[j]][fgseaRes[[i]][[j]]$pathway %in% gs,]
+  # create t-statisitc 
+  df[[i]][[j]]$celltype <- i
+  df[[i]][[j]]$CNV <- j
+}
+  fgsea_celltype[[i]] <- Reduce(rbind,df[[i]])
+}
+fgsea_mitoATP <- Reduce(rbind,fgsea_celltype)
+
+fgsea_mitoATP$celltype <- revalue(fgsea_mitoATP$celltype, c("Inhibitory_CGE"="CGE-Derived Inhibitory Neurons", "Inhibitory_MGE"="MGE-Derived Inhibitory Neurons","L2_3Excitatory" ="Upper Layer Excitatory Neurons","L5_6Excitatory"="Lower Layer Excitatory Neurons"))
+fgsea_mitoATP$celltype <- factor(fgsea_mitoATP$celltype,levels = rev(c("VLMC_Endo", "OPC", "Oligodendrocytes", "Microglia", "Astrocyte", "Upper Layer Excitatory Neurons", "Lower Layer Excitatory Neurons", "MGE-Derived Inhibitory Neurons", "CGE-Derived Inhibitory Neurons")))
+fgsea_mitoATP$CNV <- sub(".*CNV","",fgsea_mitoATP$CNV)
+
+png("heatmap_fgsea_mitochondrialATP.png", width = 900, height = 600, res = 100)
+fig = ggplot(oxphos_df, aes(assay, coef, fill=t, label=ifelse(FDR < 0.10, '*', ''))) +
+  geom_tile() + 
+  theme_classic() + 
+  scale_fill_gradient2("t-statistic", low="blue", mid="white", high="red") + 
+  theme_cowplot()+
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1), plot.title = element_text(hjust = 0.5)) + 
+  geom_text(vjust=1, hjust=0.5) + 
+  ylab("CNV") +
+  xlab("Cell Type")+
+  ggtitle("GO0042775: mitochondrial ATP synthesis coupled electron transport")
+fig
+dev.off()
+
+genelistNCvsC_dreamlet<- list()
+for(i in names(res.dl_numberofcells)){for(j in coefNames(res.dl_numberofcells)[2:11]){
+  print(i)
+  genelistNCvsC_dreamlet[[i]][[j]] <- topTable(res.dl_numberofcells[[paste(i)]], coef = j, number = Inf)
+}}
+
+DEG_dream <- list()
+DEG_count<- list()
+for (i in names(genelistNCvsC_dreamlet)){for(j in names(genelistNCvsC_dreamlet[[i]])){
+  print(i)
+  print(j)
+  DEG_dream[[i]][[j]] <- subset(genelistNCvsC_dreamlet[[i]][[j]], diffexpressed != "NO")
+  DEG_dream[[i]][[j]]$Key <- paste(DEG_dream[[i]][[j]]$diffexpressed,DEG_dream[[i]][[j]]$fdr_0.1, sep = "_")
+  DEG_dream[[i]][[j]] <- DEG_dream[[i]][[j]] %>%
+    dplyr::group_by(Key)%>%
+    dplyr::count()
+  DEG_dream[[i]][[j]]$celltype <- i
+  DEG_dream[[i]][[j]]$group <-j
+}
+  DEG_count[[i]] <- do.call(rbind, Map(data.frame, DEG_dream[[i]]))
+}
+
+DEG_dream_merge <- do.call(rbind, Map(data.frame,DEG_count))
+library(plyr)
+DEG_dream_merge$Key <- revalue(DEG_dream_merge$Key, c("DOWN_FALSE"="Downregulated", "DOWN_TRUE"="Downregulated (FDR <0.1)","UP_FALSE" ="Upregulated","UP_TRUE"="Upregulated (FDR<0.1)"))
+DEG_dream_merge$celltype <- revalue(DEG_dream_merge$celltype, c("Inhibitory_CGE"="CGE-Derived Inhibitory Neurons", "Inhibitory_MGE"="MGE-Derived Inhibitory Neurons","L2_3Excitatory" ="Upper Layer Excitatory Neurons","L5_6Excitatory"="Lower Layer Excitatory Neurons"))
+DEG_dream_merge$celltype <- factor(DEG_dream_merge$celltype,levels = c("VLMC_Endo", "OPC", "Oligodendrocytes", "Microglia", "Astrocyte", "Upper Layer Excitatory Neurons", "Lower Layer Excitatory Neurons", "MGE-Derived Inhibitory Neurons", "CGE-Derived Inhibitory Neurons"))
+dput(levels(as.factor(DEG_dream_merge$group)))
+DEG_dream_merge$group <- factor(DEG_dream_merge$group,levels = c("CNV22q11.2 del", "CNV22q11.2 dup","CNV16p11.2 del", "CNV16p11.2 dup", "CNV7q11.23 WBS del","CNV1q21.1 del", "CNV1q21.1 dup","CNV15q11.2 BP1-2 del", "CNV15q11.2 BP1-2 dup","celltype.prop"))
+library(ggplot2)
+png("dreamlet_barplot_FDR.png", width = 2500, height = 1300, res = 240)
+ggplot2::ggplot(data = DEG_dream_merge, aes(celltype, n, fill = Key)) +
+  geom_bar(position = "stack", stat="identity")+
+  scale_fill_manual(values=c("dodgerblue","dodgerblue4","firebrick1","firebrick3"))+
+  labs(title = "Dreamlet Results by CNV", subtitle = "~CNV+Cell.Type.Proportion+(1|Region)+(1|MG)+(1|HBCC_BrNum)",
+       y = "Count of DEGs") + 
+  coord_flip()+
+  facet_wrap(~ group,ncol=4)+
+  theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust=0.5))
+dev.off()
