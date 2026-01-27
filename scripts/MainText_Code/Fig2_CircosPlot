@@ -1,0 +1,477 @@
+#Install packages
+suppressPackageStartupMessages({
+  library(plyr)
+  library(dplyr)
+  library(tidyr)
+  library(cowplot)
+  library(ggplot2)
+  library(corrplot)
+  library(pheatmap)
+  library(edgeR)
+  library(limma)
+  library(tidyverse)
+  library(circlize)
+  library(ComplexHeatmap)
+  library(foreach)
+  library(doParallel)
+  library(edgeR)
+  library(blockmodels)
+  library(pheatmap)
+  library(limma)
+  library(dplyr)
+  library(tidyverse)
+  library(RColorBrewer)
+  library(mclust)  
+  library(reshape2)
+})
+
+
+genelistNCvsC_dreamlet <- readRDS("/data/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/Removed_MT_RiboGenes/~CNV+(1|Region)+(1|Match_group)+(1|HBCC_BrNum)/genelistNCvsC_dreamlet")
+
+
+genelistNCvsC_dreamlet_merge_ct <- lapply(genelistNCvsC_dreamlet, function(bind){
+  bind_rows(bind)
+})
+full_DGE_dataframe <- bind_rows(genelistNCvsC_dreamlet_merge_ct)
+
+
+full_DGE_dataframe$CNV_celltype <- paste(full_DGE_dataframe$CNV,full_DGE_dataframe$celltype, sep ="__")
+flattened_data_CNV <- full_DGE_dataframe %>%
+  dplyr::select(gene.name, logFC, CNV_celltype)
+
+names(flattened_data_CNV) <- c("gene","logFC","CNV_Celltype")
+
+# Ensure the data is filtered to shared genes and reshaped correctly
+reshaped_data_CNV <- flattened_data_CNV %>%
+  tidyr::pivot_wider(names_from = CNV_Celltype, values_from = logFC)
+
+matrix_logfc <- as.matrix(reshaped_data_CNV[, -1]) 
+rownames(matrix_logfc) <- reshaped_data_CNV$gene 
+
+CorMat <- cor(matrix_logfc, use = "pairwise.complete.obs")
+
+get_upper_tri <- function(CorMat){
+  CorMat[upper.tri(CorMat)]<- NA
+  return(CorMat)
+}
+
+get_lower_tri <- function(CorMat){
+  CorMat[lower.tri(CorMat)]<- NA
+  return(CorMat)
+}
+
+reorder <- function(CorMat){
+  dd <- as.dist((1-CorMat)/2)
+  hc <- hclust(dd)
+  CorMar <- CorMat[hc$order, hc$order]
+}
+
+
+CorMat <- reorder(CorMat)
+upper_tri <- get_upper_tri(CorMat)
+lower_tri <- get_lower_tri(CorMat)
+meltNum <- melt(lower_tri, na.rm = T)
+meltColor <- melt(upper_tri, na.rm = T)
+
+pdf("CNV_correlations.pdf", width = 17, height = 13)
+pearson_correlations = ggplot() +
+  labs(x = NULL, y = NULL) +
+  geom_tile(data = meltColor, 
+            mapping = aes(Var2, Var1, 
+                          fill = value)) +
+  scale_fill_gradient2(low = "blue",mid="white", high = "firebrick4",
+                       limit = c(-1,1), name = "Pearson\nCorrelation") +
+  scale_x_discrete(position = "top") +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        axis.text.x = element_text(angle=60, hjust = 0)) +
+  coord_fixed()
+dev.off()
+
+######################################
+#WSBM on CNV logFCs
+######################################
+rownames(CorMat) <- gsub("(CNV|WBS\\s*|BP1-2\\s*)", "", rownames(CorMat))
+colnames(CorMat) <- gsub("(CNV|WBS\\s*|BP1-2\\s*)", "", colnames(CorMat))
+
+rownames(CorMat) <- str_replace_all(rownames(CorMat), c(
+  "L2_3Excitatory" = "Upper-Layer Excitatory",
+  "L5_6Excitatory" = "Lower-Layer Excitatory",
+  "Inhibitory_CGE" = "CGE-Derived Inhibitory",
+  "Inhibitory_MGE" = "MGE-Derived Inhibitory"))
+colnames(CorMat) <- str_replace_all(colnames(CorMat), c(
+  "L2_3Excitatory" = "Upper-Layer Excitatory",
+  "L5_6Excitatory" = "Lower-Layer Excitatory",
+  "Inhibitory_CGE" = "CGE-Derived Inhibitory",
+  "Inhibitory_MGE" = "MGE-Derived Inhibitory"))
+
+# Run WSBM clustering
+set.seed(42)
+wsbm_model <- BM_gaussian(membership_type = "SBM", adj = CorMat)
+wsbm_model$estimate()
+
+# Find the best model based on ICL
+best_model_index <- which.max(wsbm_model$ICL)
+
+# Extract cluster labels from the best model
+cluster_labels <- apply(wsbm_model$memberships[[best_model_index]]$Z, 1, which.max)
+
+
+#########################################
+#WSBM Line Circos plot 
+#########################################
+cluster_annotation <- data.frame(Cluster = factor(cluster_labels))
+rownames(cluster_annotation) <- rownames(CorMat)
+
+cnv_order <- c("22q11.2 del", "22q11.2 dup", "16p11.2 del", "16p11.2 dup","7q11.23 del", "1q21.1 del", "1q21.1 dup", "15q11.2 del", "15q11.2 dup")
+
+# Extract CNV name from row/column names
+get_cnv <- function(x) sapply(strsplit(x, "__"), `[`, 1)
+cnv_names <- get_cnv(rownames(CorMat))
+
+# Reorganize the dataframe by CNV order
+label_df <- data.frame(label = rownames(CorMat), cnv = cnv_names, stringsAsFactors = FALSE)
+label_df$cnv <- factor(label_df$cnv, levels = cnv_order)
+ordered_labels <- label_df %>% arrange(cnv) %>% pull(label)
+
+# Reorder the matrix
+CorMat_ordered <- CorMat[ordered_labels, ordered_labels]
+
+# Prepare data
+labels <- rownames(CorMat_ordered)
+cnv_names <- sapply(strsplit(labels, "__"), `[`, 1)
+celltype_names <- sapply(strsplit(labels, "__"), `[`, 2)
+
+plot_df <- data.frame(
+  label = labels,
+  cnv = cnv_names,
+  celltype = celltype_names,
+  cluster = cluster_annotation[labels, "Cluster"]
+)
+
+# Assign colors to CNVs
+cnv_colors <- c("16p11.2 del" = "#FB9A99", "16p11.2 dup" = "#E31A1C",
+                "22q11.2 del" = "#FDBF6F", "22q11.2 dup" = "#FF7F00",
+                "15q11.2 del" = "#B2DF8A", "15q11.2 dup" = "#33A02C",
+                "1q21.1 del" = "#A6CEE3", "1q21.1 dup" = "#1F78B4",
+                "7q11.23 del" = "#CAB2D6")
+celltype_colors <- c("Astrocyte"="#9983BD", "CGE-Derived Inhibitory"="#90D5E4", "MGE-Derived Inhibitory"="#3BBCA8", "Lower-Layer Excitatory"="#89C75F","Upper-Layer Excitatory"="#208A42", "Microglia"="#E6C2DC", "Oligodendrocytes"="#F37B7D", "OPC"="#F59899", "VLMC_Endo"="#C06CAB")
+celltype_colors <- rep("white",9)
+names(celltype_colors) <- unique(plot_df$celltype)
+
+
+# Assign colors to clusters
+cluster_colors <- setNames(colorRampPalette(brewer.pal(8, "Dark2"))(14), 1:14)
+
+pdf("cluster_legend.pdf", width = 6, height =6)
+cluster_legend <- Legend(
+  title = "Cluster",
+  at = names(cluster_colors),
+  legend_gp = gpar(fill = cluster_colors)
+)
+draw(cluster_legend, just = "right")
+dev.off()
+
+pdf("circos_plot_legends.pdf", width = 6, height =4)
+celltype_legend <- Legend(
+  title = "Cell Type",
+  at = names(celltype_colors),
+  legend_gp = gpar(fill = celltype_colors)
+)
+draw(celltype_legend, just = "right")
+cnv_legend <- Legend(
+  title = "CNV",
+  at = names(cnv_colors),
+  legend_gp = gpar(fill = cnv_colors)
+)
+draw(cnv_legend, just = "left")
+dev.off()
+
+pdf("circosplot_lines_withoutcelltype_smallbox.pdf", width = 6, height = 6)
+circos.clear()
+circos.par(
+  start.degree = 90,
+  gap.degree = 2,
+  track.margin = c(0.01, 0.01),
+  canvas.xlim = c(-1, 1),
+  canvas.ylim = c(-1, 1)
+)
+
+circos.initialize(factors = plot_df$label, xlim = c(0, 1))
+
+circos.trackPlotRegion(
+  ylim = c(0, 1),
+  factors = plot_df$label,
+  bg.col = celltype_colors[plot_df$celltype],
+  bg.border = F,
+  track.height = 0.05,
+  panel.fun = function(x, y) {
+  }
+)
+
+circos.trackPlotRegion(
+  ylim = c(0, 1),
+  factors = plot_df$label,
+  bg.col = cnv_colors[plot_df$cnv],
+  track.height = 0.2
+)
+
+cnv_positions <- tapply(plot_df$label, plot_df$cnv, function(labels) {
+  mean(sapply(labels, function(lab) get.cell.meta.data("xcenter", sector.index = lab)))
+})
+
+for (cl in unique(plot_df$cluster)) {
+  nodes <- plot_df$label[plot_df$cluster == cl]
+  if (length(nodes) > 1) {
+    combs <- combn(nodes, 2)
+    apply(combs, 2, function(pair) {
+      circos.link(sector.index1 = pair[1], point1 = 0.5,
+                  sector.index2 = pair[2], point2 = 0.5,
+                  col = cluster_colors[as.character(cl)], lwd = 1)
+    })
+  }
+}
+dev.off()
+
+
+
+# Compute observed ARIs
+labels <- rownames(cluster_annotation)
+cnv_names <- sapply(strsplit(labels, "__"), `[`, 1)
+celltype_names <- sapply(strsplit(labels, "__"), `[`, 2)
+
+ari_cnv <- adjustedRandIndex(cluster_annotation$Cluster, cnv_names)
+ari_celltype <- adjustedRandIndex(cluster_annotation$Cluster, celltype_names)
+
+# Permutation test
+n_perm <- 10000
+perm_ari_cnv <- numeric(n_perm)
+perm_ari_celltype <- numeric(n_perm)
+
+set.seed(24)
+for (i in 1:n_perm) {
+  perm_ari_cnv[i] <- adjustedRandIndex(cluster_annotation$Cluster, sample(cnv_names))
+  perm_ari_celltype[i] <- adjustedRandIndex(cluster_annotation$Cluster, sample(celltype_names))
+}
+
+# Compute empirical p-values for CNV and celltype blocking
+p_cnv <- mean(perm_ari_cnv >= ari_cnv) #0
+p_celltype <- mean(perm_ari_celltype >= ari_celltype) #0.6616
+
+
+###Heatmap 
+unique_clusters <- sort(unique(cluster_labels))
+cluster_label_map <- setNames(seq_along(unique_clusters), unique_clusters)
+ordered_cluster_labels <- cluster_label_map[cluster_labels]
+ordered_idx <- order(ordered_cluster_labels)
+ordered_cor_matrix <- CorMat[ordered_idx, ordered_idx]
+
+cell_types <- rownames(ordered_cor_matrix)
+celltype_colors <- c("Astrocyte"="#9983BD","CGE-Derived Inhibitory"="#90D5E4","MGE-Derived Inhibitory"="#3BBCA8","Lower-Layer Excitatory"="#89C75F","Upper-Layer Excitatory"="#208A42","Microglia"="#E6C2DC","Oligodendrocytes"="#F37B7D","OPC"="#F59899","VLMC_Endo"="#C06CAB")
+
+CNVs <- sapply(rownames(ordered_cor_matrix), function(x) sub("__.*","",x))
+Celltypes <- sapply(rownames(ordered_cor_matrix), function(x) sub(".*__","",x))
+
+CNV_colors <- c("16p11.2 del"="#FB9A99","16p11.2 dup"="#E31A1C","22q11.2 del"="#FDBF6F","22q11.2 dup"="#FF7F00","15q11.2 del"="#B2DF8A","15q11.2 dup"="#33A02C","1q21.1 del"="#A6CEE3","1q21.1 dup"="#1F78B4","7q11.23 del"="#CAB2D6")
+
+
+cluster_palette <- c("#62358A","#358A8A","#8A358A","#8A8A35","#356E8A","#8A6E35","#356E35","#6E358A","#358A55","#8A3555","#558A35","#35558A","#8A5535","#55358A")
+
+cluster_colors <- setNames(cluster_palette,1:14)
+
+cluster_annotation <- data.frame(Cluster=factor(ordered_cluster_labels[ordered_idx]))
+rownames(cluster_annotation) <- rownames(ordered_cor_matrix)
+names(cluster_colors) <- unique(cluster_annotation$Cluster)
+
+annotation_row <- data.frame(Clust=factor(cluster_annotation$Cluster),CNV=factor(CNVs))
+rownames(annotation_row) <- rownames(ordered_cor_matrix)
+annotation_col <- data.frame(CT=factor(Celltypes))
+rownames(annotation_col) <- rownames(ordered_cor_matrix)
+
+ann_colors <- list(CNV=CNV_colors,CT=celltype_colors,Clust=cluster_colors)
+library(pheatmap)
+pdf("cnv_correlations_wsbm.pdf",width=20,height=16)
+cnv_pheatmap <- pheatmap(ordered_cor_matrix,annotation_col=annotation_col,annotation_row=annotation_row,annotation_colors=ann_colors,cluster_rows=FALSE,cluster_cols=FALSE,color=colorRampPalette(c("darkblue","white","darkred"))(200),breaks=seq(-1,1,length.out=201),main="WSBM on CNV Correlations")
+cnv_pheatmap
+dev.off()
+
+
+celltype_colors <- c("white","white")
+names(celltype_colors) <- unique(simplified_cell_types)
+
+
+#################################################
+#Looking at specific clusters for (1) divergence and (2) convergence 
+#################################################
+str(plot_df)
+plot_df_summary = plot_df %>%
+  dplyr::group_by(cluster) %>%
+  dplyr::summarise(number_cnvs = n_distinct(cnv))
+
+str(plot_df_summary)
+hist = ggplot(plot_df_summary, aes(x=number_cnvs)) +
+  geom_histogram() +
+  labs(y="Number of Clusters", x= "Number of CNVs within Cluster", title = "Correlated Structure Across the 9 CNVs")+
+  theme_minimal(base_size = 14)+
+  theme(plot.title = element_text(hjust = 0.5, face = "bold")) 
+
+plot_df_summary <- plot_df %>%
+  dplyr::group_by(cluster, cnv) %>%
+  dplyr::summarise(count = n(), .groups = 'drop')
+
+plot_df_summary <- plot_df_summary %>%
+  dplyr::group_by(cluster) %>%
+  dplyr::mutate(prop = count / sum(count))
+
+CNV_colors <- c("16p11.2 del" = "#FB9A99", "16p11.2 dup" = "#E31A1C",
+                "22q11.2 del" = "#FDBF6F", "22q11.2 dup" = "#FF7F00",
+                "15q11.2 del" = "#B2DF8A", "15q11.2 dup" = "#33A02C",
+                "1q21.1 del" = "#A6CEE3", "1q21.1 dup" = "#1F78B4",
+                "7q11.23 del" = "#CAB2D6")
+
+piecharts = ggplot(plot_df_summary, aes(x = "", y = prop, fill = cnv)) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar(theta = "y") +
+  facet_wrap(~cluster, ncol = 14) +
+  scale_fill_manual(values= CNV_colors)+
+  theme_void() +
+  theme(strip.text = element_text(size=15, face="bold"))+
+  NoLegend()
+pdf("piecharts_cnv_make_up_long.pdf", width = 25, height = 3)
+piecharts
+dev.off()
+
+make_circos_single_cluster <- function(
+    plot_df,
+    cluster_colors,
+    CNV_colors,
+    celltype_colors,
+    chosen_cluster,
+    pdf_file = "circos_single_cluster.pdf",
+    width = 16,
+    height = 16
+) {
+  
+  plot_df$label_new = sub("__"," ",plot_df$label)
+  sectors <- plot_df$label_new
+  
+  sector_clusters  <- setNames(plot_df$cluster,  plot_df$label_new)
+  sector_CNVs      <- setNames(plot_df$cnv, plot_df$label_new)
+  sector_celltypes <- setNames(plot_df$celltype, plot_df$label_new)
+  #Empty block so then I can add the annotations
+  empty_label <- "__EMPTY__"
+  sectors <- c(sectors, empty_label)
+  sector_clusters  <- c(sector_clusters,  setNames("empty", empty_label))
+  sector_CNVs      <- c(sector_CNVs,      setNames("empty", empty_label))
+  sector_celltypes <- c(sector_celltypes, setNames("empty", empty_label))
+  cluster_colors["empty"]  <- NA
+  celltype_colors["empty"] <- NA
+  CNV_colors["empty"]      <- NA
+  
+  cluster_sectors <- plot_df |> 
+    dplyr::filter(cluster == chosen_cluster) |> 
+    dplyr::pull(label_new)
+  
+  link_color <- adjustcolor(cluster_colors[as.character(chosen_cluster)], alpha.f = 0.6)
+  
+  pdf(pdf_file, width = width, height = height)
+  par(mar = c(8,8,8,8))
+  circos.clear()
+  circos.initialize(factors = sectors, xlim = c(0, 1))
+  circos.par(
+    start.degree = 90,
+    gap.degree = 0.5,
+    cell.padding = c(0,0,0,0),
+    track.margin = c(0,0)
+  )
+  
+  #Rings: Cluster -> Celltype -> CNV
+  circos.trackPlotRegion(
+    factors = sectors, ylim = c(0,1),
+    bg.col =cluster_colors[as.character(sector_clusters)],
+    track.height = 0.08,
+    bg.border = NA,
+    track.margin = c(0.005, 0.005)
+  )
+  circos.trackPlotRegion(
+    factors = sectors, ylim = c(0,1),
+    bg.col = celltype_colors[as.character(sector_celltypes)],
+    track.height = 0.10,
+    bg.border = NA,
+    track.margin = c(0.005, 0.005)
+  )
+  
+  circos.trackPlotRegion(
+    factors = sectors, ylim = c(0,1),
+    bg.col = CNV_colors[as.character(sector_CNVs)],
+    track.height = 0.25,
+    bg.border = NA,
+    track.margin = c(0.005, 0.005)
+  )
+  # label_offset <- 0.8    
+  # label_y <- 1 + label_offset
+  # 
+  # for(sector in sectors) {
+  #   circos.text(
+  #     x = 0.5,
+  #     y = label_y,
+  #     labels = sector_celltypes[sector], 
+  #     sector.index = sector,
+  #     facing = "clockwise",
+  #     niceFacing = TRUE,
+  #     adj = c(0, 0.5),
+  #     cex = 1,
+  #     font = 2
+  #   )
+  # }
+
+  if (length(cluster_sectors) > 1) {
+    for (i in 1:(length(cluster_sectors) - 1)) {
+      for (j in (i+1):length(cluster_sectors)) {
+        circos.link(
+          cluster_sectors[i], 0.5,
+          cluster_sectors[j], 0.5,
+          col = link_color,
+          border = NA,
+          h.ratio = 0.2 
+        )
+      }
+    }
+  }
+  
+  dev.off()
+}
+
+make_circos_single_cluster(
+  plot_df,
+  cluster_colors = cluster_colors,
+  CNV_colors = CNV_colors,
+  celltype_colors = celltype_colors,
+  chosen_cluster = 9,
+  pdf_file = "cluster9_plot_nolabel_changedim.pdf")
+
+make_circos_single_cluster(
+  plot_df,
+  cluster_colors = cluster_colors,
+  CNV_colors = CNV_colors,
+  celltype_colors = celltype_colors,
+  chosen_cluster = 2,
+  pdf_file = "cluster2_plot_nolabel.pdf")
+
+make_circos_single_cluster(
+  plot_df,
+  cluster_colors = cluster_colors,
+  CNV_colors = CNV_colors,
+  celltype_colors = celltype_colors,
+  chosen_cluster = 14,
+  pdf_file = "cluster14_plot_nolabel.pdf")
+
+make_circos_single_cluster(
+  plot_df,
+  cluster_colors = cluster_colors,
+  CNV_colors = CNV_colors,
+  celltype_colors = celltype_colors,
+  chosen_cluster = 1,
+  pdf_file = "cluster1_plot_nolabel.pdf")
