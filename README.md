@@ -1,6 +1,6 @@
 # Transcriptomic signatures of nine high-risk neuropsychiatric copy number variants in human brain cells
 
-Authors: Gabi Dugan1, Nirmala Akula1, Stefano Marenco2, Pavan K Auluck2, Armin Raznahan1, Siyuan Liu1, Alex DeCasien1, Qing Xu2, Ningping Feng2, Bhaskar Kolachana2, Xueying Jiang1, Michael D Gregory3, Karen F Berman3, Gabriel Hoffman4, Panos Roussos4, Francis J McMahon*1, Anton Schulmann*1,5 
+Authors: Gabi Dugan1, Nirmala Akula1, Stefano Marenco2, Pavan K Auluck2, Armin Raznahan1, Siyuan Liu1, Alex DeCasien1, Qing Xu2, Ningping Feng2, Bhaskar Kolachana2, Xueying Jiang1, Michael D Gregory3, Karen F Berman3, Gabriel Hoffman4, Panos Roussos4, Francis J McMahon*1, Anton Schulmann *1,5 
 
 Affiliations: 1 Human Genetics Branch, 2 Human Brain Collection Core (HBCC),3 Clinical and Translational Neuroscience Branch, National Institute of Mental Health (NIMH), 4 Icahn School of Medicine, Mount Sinai, 5 New York State Psychiatric Institute, Dept. of Psychiatry, Columbia University 
 
