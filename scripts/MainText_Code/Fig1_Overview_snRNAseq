@@ -16,13 +16,9 @@ library(gridExtra)
 library(cowplot)
 library(Seurat)
 
-#Read in important data 
+#Read in data
 #Filtered seurat object
 snCNV_spx_nd_adult_MG_fc_MG_fc_MG <- readRDS("/gpfs/gsfs12/users/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/snCNV_spx_nd_adult_MG_fc_MG_fc_MG")
-
-#Dreamlet results
-genelistNCvsC_dreamlet <- readRDS("/data/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/Removed_MT_RiboGenes/~CNV+(1|Region)+(1|Match_group)+(1|HBCC_BrNum)/genelistNCvsC_dreamlet")
-genelistNCvsC_dreamlet_refrmt_editCNVgenes <- readRDS("/data/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/Removed_MT_RiboGenes/~CNV+(1|Region)+(1|Match_group)+(1|HBCC_BrNum)/genelistNCvsC_dreamlet_refrmt_editCNVgenes")
 
 ##################################
 #Figure 1
