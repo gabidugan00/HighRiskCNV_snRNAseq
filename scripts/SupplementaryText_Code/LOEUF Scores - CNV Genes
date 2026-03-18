@@ -1,0 +1,249 @@
+library(readr)
+library(WriteXLS)
+library(dplyr)
+library(plyr)
+library(ggplot2)
+library(cowplot)
+library(Seurat)
+library(grid)
+
+#Read in data, DGE from dreamlet
+genelistNCvsC_dreamlet_refrmt<- readRDS("/data/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/genelistNCvsC_dreamlet_refrmt")
+
+##################################################
+#LOEUF Scores 
+##################################################
+gnomad_constraint_v4 <- read_tsv("~/gnomad.v4.1.constraint_metrics.tsv")
+gnomad_constraint_v4 <- gnomad_constraint_v4[gnomad_constraint_v4$mane_select == "TRUE",]
+
+merge<- list()
+for(i in names(genelistNCvsC_dreamlet_refrmt)){for(j in names(genelistNCvsC_dreamlet_refrmt[[i]])){
+  genelistNCvsC_dreamlet_refrmt[[i]][[j]]$pLI_score_new <- gnomad_constraint_v4$lof.pLI[match(genelistNCvsC_dreamlet_refrmt[[i]][[j]]$Ensemble.IDs, gnomad_constraint_v4$gene_id)]
+  genelistNCvsC_dreamlet_refrmt[[i]][[j]]$pLI_score_new<- as.numeric(genelistNCvsC_dreamlet_refrmt[[i]][[j]]$pLI_score_new)
+  genelistNCvsC_dreamlet_refrmt[[i]][[j]]$LOEUF_score_new <- gnomad_constraint_v4$lof.oe_ci.upper[match(genelistNCvsC_dreamlet_refrmt[[i]][[j]]$Ensemble.IDs, gnomad_constraint_v4$gene_id)]
+  genelistNCvsC_dreamlet_refrmt[[i]][[j]]$Inverse_LOEUF_new<- 1/(genelistNCvsC_dreamlet_refrmt[[i]][[j]]$LOEUF_score_new)
+}
+  merge[[i]] <- Reduce(rbind,genelistNCvsC_dreamlet_refrmt[[i]])
+}
+merge2<- Reduce(rbind,Map(data.frame,merge))
+merge2_cnv <- merge2[merge2$CNV.Gene.New.ClinGen == "YES",]
+
+genelistNCvsC_dreamlet_refrmt_CNV <- list()
+PLI_LOEUF_scores_CNVgenes<- list()
+PLI_scores_merge<- list()
+genelistNCvsC_dreamlet_refrmt_CNV_merge <- list()
+for(i in names(genelistNCvsC_dreamlet_refrmt)){for(j in names(genelistNCvsC_dreamlet_refrmt[[i]])){
+  genelistNCvsC_dreamlet_refrmt_CNV[[i]][[j]] <- genelistNCvsC_dreamlet_refrmt[[i]][[j]][genelistNCvsC_dreamlet_refrmt[[i]][[j]]$CNV.Gene.New.ClinGen =="YES",]
+  PLI_LOEUF_scores_CNVgenes[[i]][[j]] <- data.frame(sum(genelistNCvsC_dreamlet_refrmt_CNV[[i]][[j]]$pLI_scores,na.rm = TRUE),i,j)
+  PLI_LOEUF_scores_CNVgenes[[i]][[j]] <- data.frame(PLI_LOEUF_scores_CNVgenes[[i]][[j]])
+  names(PLI_LOEUF_scores_CNVgenes[[i]][[j]]) <- c("pLI_Score_Sum","celltype","CNV")
+  PLI_LOEUF_scores_CNVgenes[[i]][[j]]$pLI_Score_Proportion <- sum(genelistNCvsC_dreamlet_refrmt_CNV[[i]][[j]]$pLI_scores,na.rm = TRUE)/nrow(genelistNCvsC_dreamlet_refrmt_CNV[[i]][[j]][genelistNCvsC_dreamlet_refrmt_CNV[[i]][[j]]$CNV.Gene.New.ClinGen=="YES",])
+  genelistNCvsC_dreamlet_refrmt_CNV[[i]][[j]]$Inverse_LOEUF_new[is.infinite(genelistNCvsC_dreamlet_refrmt_CNV[[i]][[j]]$Inverse_LOEUF_new)] <- NA
+  PLI_LOEUF_scores_CNVgenes[[i]][[j]]$Inverse_LOEUF_new_sum <- sum(genelistNCvsC_dreamlet_refrmt_CNV[[i]][[j]]$Inverse_LOEUF_new, na.rm = TRUE)
+}
+  genelistNCvsC_dreamlet_refrmt_CNV_merge[[i]] <- Reduce(rbind,genelistNCvsC_dreamlet_refrmt_CNV[[i]])
+  PLI_scores_merge[[i]] <- Reduce(rbind,PLI_LOEUF_scores_CNVgenes[[i]])
+}
+genelistNCvsC_dreamlet_refrmt_CNV_merge<- Reduce(rbind,genelistNCvsC_dreamlet_refrmt_CNV_merge)
+CNV_Genes <- genelistNCvsC_dreamlet_refrmt_CNV_merge[unique(genelistNCvsC_dreamlet_refrmt_CNV_merge$gene.name),]
+
+DEG_dream <- list()
+DEG_count<- list()
+for (i in names(genelistNCvsC_dreamlet_refrmt)){for(j in names(genelistNCvsC_dreamlet_refrmt[[i]])){
+  print(i)
+  print(j)
+  DEG_dream[[i]][[j]] <- subset(genelistNCvsC_dreamlet_refrmt[[i]][[j]],adj.P.Val <0.05)
+  DEG_dream[[i]][[j]] <- DEG_dream[[i]][[j]] %>%
+    dplyr::count()
+  DEG_dream[[i]][[j]]$celltype <- j
+  DEG_dream[[i]][[j]]$group <-i
+  DEG_dream[[i]][[j]]$pLI_scores_sumCNV <- PLI_LOEUF_scores_CNVgenes[[i]][[j]]$pLI_Score_Sum
+  DEG_dream[[i]][[j]]$pLI_scores_propCNV <- PLI_LOEUF_scores_CNVgenes[[i]][[j]]$pLI_Score_Proportion
+  DEG_dream[[i]][[j]]$InverseLOEUF_Score <- PLI_LOEUF_scores_CNVgenes[[i]][[j]]$Inverse_LOEUF_new_sum
+}
+  DEG_count[[i]] <- do.call(rbind, Map(data.frame, DEG_dream[[i]]))
+}
+
+isNA<- list()
+for(i in names(PLI_LOEUF_scores_CNVgenes)){for(i in names(PLI_LOEUF_scores_CNVgenes[[i]])){
+  print(i)
+  isNA[[i]][[j]] <- PLI_LOEUF_scores_CNVgenes[[i]][[j]][is.na(PLI_LOEUF_scores_CNVgenes[[i]][[j]]),]
+  print(length(unique(isNA[[i]][[j]]$gene.name)))
+}}
+
+
+DEG_dream_merge <- do.call(rbind, Map(data.frame,DEG_count))
+
+DEG_dream_merge$celltype <- revalue(DEG_dream_merge$celltype, c("Inhibitory_CGE"="CGE-Derived Inhibitory Neurons", "Inhibitory_MGE"="MGE-Derived Inhibitory Neurons","L2_3Excitatory" ="Upper Layer Excitatory Neurons","L5_6Excitatory"="Lower Layer Excitatory Neurons"))
+DEG_dream_merge$celltype <- factor(DEG_dream_merge$celltype,levels = rev(c("VLMC_Endo", "OPC", "Oligodendrocytes", "Microglia", "Astrocyte", "Upper Layer Excitatory Neurons", "Lower Layer Excitatory Neurons", "MGE-Derived Inhibitory Neurons", "CGE-Derived Inhibitory Neurons")))
+DEG_dream_merge$CNVGroup <- DEG_dream_merge$group
+DEG_dream_merge$CNVGroup <- sub(" del.*","",DEG_dream_merge$CNVGroup)
+DEG_dream_merge$CNVGroup <- sub(" dup.*","",DEG_dream_merge$CNVGroup)
+DEG_dream_merge$CNVGroup <- sub("CNV","",DEG_dream_merge$CNVGroup)
+DEG_dream_merge$CNVGroup<- factor(DEG_dream_merge$CNVGroup,levels = c( "1q21.1","15q11.2 BP1-2","16p11.2", "22q11.2","7q11.23 WBS"
+))
+
+DEG_dream_merge_deletions <- DEG_dream_merge[grep("del",DEG_dream_merge$group),]
+
+lm_eqn <- function(df){
+  m <- lm(log10(`n`+1)~`InverseLOEUF_Score`, df);
+  eq <- substitute(italic(r)^2~"="~r2*"\n," ~italic(p)~"="~pvalue*"\n,"~italic(Shapiro_Wilk_p)~"="~Shapiro_Wilkp,
+                   list(r2 = format(summary(m)$r.squared, digits = 3),
+                        pvalue = format(summary(m)$coefficients[2,4], digits = 2),
+                        Shapiro_Wilkp = format(shapiro.test(resid(m))[["p.value"]], digits =2)))
+  as.character(as.expression(eq));
+}
+
+DEG_dream_merge_deletions_no1q <- DEG_dream_merge_deletions[!grepl("1q",DEG_dream_merge_deletions$group),]
+
+m <- lm(log10(`n`+1)~`InverseLOEUF_Score`, DEG_dream_merge_deletions_no1q)
+summary(m)
+
+# Coefficients:
+#   Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)        0.617645   0.197931   3.121  0.00367 ** 
+#   InverseLOEUF_Score 0.046063   0.007082   6.505 1.92e-07 ***
+shapiro.test(resid(m))
+# Shapiro-Wilk normality test
+# 
+# data:  resid(m)
+# W = 0.94987, p-value = 0.1036
+
+loeuf_no1q21 <- ggplot(data = DEG_dream_merge_deletions_no1q, aes(InverseLOEUF_Score,log10(n+1))) +
+  geom_smooth(method = "lm")+
+  ylim(-0.5,5)+
+  geom_text(x = 25 ,y = 4.5, label = lm_eqn(DEG_dream_merge_deletions_no1q), parse = TRUE, size = 6)+
+  theme_cowplot()+
+  labs(title = "CNV Gene Inverse LOEUF Scores & DEG Count",subtitle="Deletions, No 1q21.1DEL",y = "log10(DEG Count+1)",x = "CNV Genes Inverse LOEUF Score Sum") + 
+  theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust = 0.5))+
+  geom_point(aes(color = CNVGroup,shape = celltype, size=5))+
+  scale_shape_manual(values=c(15,16,17,18,0,1,2,3,4))+
+  scale_color_manual(values = c("15q11.2 BP1-2" = "#66FF66", "16p11.2" = "#FF6666","22q11.2"="#FFB366","7q11.23 WBS" ="#B366FF"))+
+  NoLegend()
+
+loeuf_no1q21
+
+m <- lm(log10(`n`+1)~`InverseLOEUF_Score`,DEG_dream_merge_deletions_no1q)
+
+summary(m)
+
+summary(m)$coefficients[2,4]
+shapiro.test(resid(m))
+
+DEG_dream <-list()
+DEG_count<- list()
+CNV_genes<- list()
+for (i in names(genelistNCvsC_dreamlet_refrmt)){for(j in names(genelistNCvsC_dreamlet_refrmt[[i]])){
+  print(i)
+  print(j)
+  DEG_dream[[i]][[j]] <- subset(genelistNCvsC_dreamlet_refrmt[[i]][[j]],adj.P.Val <0.05)
+  DEG_dream[[i]][[j]] <- DEG_dream[[i]][[j]] %>%
+    dplyr::count()
+  DEG_dream[[i]][[j]]$celltype <- j
+  DEG_dream[[i]][[j]]$group <-i
+  CNV_genes[[i]][[j]] <- subset(genelistNCvsC_dreamlet_refrmt[[i]][[j]],CNV.Gene.New.ClinGen =="YES")
+  CNV_genes[[i]][[j]] <- CNV_genes[[i]][[j]] %>%
+    dplyr::count()
+  CNV_genes[[i]][[j]]$cnv_celltype <- paste(i,j)
+  DEG_dream[[i]][[j]]$cnv_celltype <- paste(i,j)
+  DEG_dream[[i]][[j]]$Number.of.CNVGenes <-CNV_genes[[i]][[j]]$n[match(DEG_dream[[i]][[j]]$cnv_celltype,CNV_genes[[i]][[j]]$cnv_celltype)]
+}
+  DEG_count[[i]] <- do.call(rbind, Map(data.frame, DEG_dream[[i]]))
+}
+
+DEG_dream_merge <- do.call(rbind, Map(data.frame,DEG_count))
+library(plyr)
+DEG_dream_merge$celltype <- revalue(DEG_dream_merge$celltype, c("Inhibitory_CGE"="CGE-Derived Inhibitory Neurons", "Inhibitory_MGE"="MGE-Derived Inhibitory Neurons","L2_3Excitatory" ="Upper Layer Excitatory Neurons","L5_6Excitatory"="Lower Layer Excitatory Neurons"))
+DEG_dream_merge$celltype <- factor(DEG_dream_merge$celltype,levels = rev(c("VLMC_Endo", "OPC", "Oligodendrocytes", "Microglia", "Astrocyte", "Upper Layer Excitatory Neurons", "Lower Layer Excitatory Neurons", "MGE-Derived Inhibitory Neurons", "CGE-Derived Inhibitory Neurons")))
+DEG_dream_merge$CNVGroup <- DEG_dream_merge$group
+DEG_dream_merge$CNVGroup <- sub(" del.*","",DEG_dream_merge$CNVGroup)
+DEG_dream_merge$CNVGroup <- sub(" dup.*","",DEG_dream_merge$CNVGroup)
+DEG_dream_merge$CNVGroup <- sub("CNV","",DEG_dream_merge$CNVGroup)
+DEG_dream_merge$CNVGroup<- factor(DEG_dream_merge$CNVGroup,levels = c( "1q21.1","15q11.2 BP1-2","16p11.2", "22q11.2","7q11.23 WBS"
+))
+
+DEG_dream_merge_deletions <- DEG_dream_merge[grep("del",DEG_dream_merge$group),]
+
+lm_eqn <- function(df){
+  m <- lm(log10(`n`+1)~`Number.of.CNVGenes`, df);
+  eq <- substitute(italic(r)^2~"="~r2*"\n," ~italic(p)~"="~pvalue*"\n,"~italic(Shapiro_Wilk_p)~"="~Shapiro_Wilkp,
+                   list(r2 = format(summary(m)$r.squared, digits = 3),
+                        pvalue = format(summary(m)$coefficients[2,4], digits = 2),
+                        Shapiro_Wilkp = format(shapiro.test(resid(m))[["p.value"]], digits =2)))
+  as.character(as.expression(eq));
+}
+
+x <-shapiro.test(resid(m))
+
+m <- lm(log10(`n`+1)~`Number.of.CNVGenes`,DEG_dream_merge_deletions)
+summary(m)
+shapiro.test(resid(m))
+# Shapiro-Wilk normality test
+# 
+# data:  resid(m)
+# W = 0.96674, p-value = 0.2198
+
+DEG_dream_merge_deletions_no1q <- DEG_dream_merge_deletions[!grepl("1q",DEG_dream_merge_deletions$group),]
+
+levels(factor(DEG_dream_merge_deletions_no1q$CNVGroup))
+
+CNV.FDR.no1q_del <- ggplot(data = DEG_dream_merge_deletions_no1q, aes(Number.of.CNVGenes,log10(n+1))) +
+  geom_smooth(method = "lm")+
+  ylim(-1,5)+
+  geom_text(x = 20, y = 5, label = lm_eqn(DEG_dream_merge_deletions_no1q), parse = TRUE, size = 6)+
+  theme_cowplot()+
+  labs(title = "CNV Genes & DEG Count Deletions", subtitle = "No 1q21.1DEL",y = "log10(DEG (FDR <0.05) Count)+1",x = "Number of Genes in CNV Region") + 
+  theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust = 0.5))+
+  geom_point(aes(color = CNVGroup,shape = celltype, size=5))+
+  scale_shape_manual(values=c(15,16,17,18,0,1,2,3,4))+
+  scale_color_manual(values = c("15q11.2 BP1-2" = "#66FF66", "16p11.2" = "#FF6666","22q11.2"="#FFB366","7q11.23 WBS" ="#B366FF"))+
+  NoLegend()
+
+
+DEG_dream_merge_duplications <- DEG_dream_merge[grepl("dup",DEG_dream_merge$cnv_celltype),]
+
+DEG_dream_merge_duplications_no1q <- DEG_dream_merge_duplications[!grepl("1q",DEG_dream_merge_duplications$cnv_celltype),]
+
+m <- lm(log10(`n`+1)~`Number.of.CNVGenes`,DEG_dream_merge_duplications)
+
+summary(m)
+shapiro.test(resid(m))
+# Shapiro-Wilk normality test
+# 
+# data:  resid(m)
+# W = 0.83703, p-value = 9.708e-05
+DEG_dream_merge_duplications$CNVGroup
+CNV.FDR_dup <- ggplot(data = DEG_dream_merge_duplications, aes(Number.of.CNVGenes,log10(n+1))) +
+  geom_smooth(method = "lm")+
+  ylim(-1,5)+
+  geom_text(x = 20, y = 5, label = lm_eqn(DEG_dream_merge_duplications), parse = TRUE, size = 6)+
+  theme_cowplot()+
+  labs(title = "CNV Genes & DEG Count Duplications",subtitle="No 1q21.1DUP",y = "log10(DEG (FDR <0.05) Count)+1",x = "Number of Genes in CNV Region") + 
+  theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust = 0.5))+
+  geom_point(aes(color = CNVGroup,shape = celltype, size=5))+
+  scale_color_manual(values = c("15q11.2 BP1-2" = "#66FF66", "16p11.2" = "#FF6666","22q11.2"="#FFB366","1q21.1"= "deepskyblue","7q11.23 WBS" ="#B366FF"))+
+  scale_shape_manual(values=c(15,16,17,18,0,1,2,3,4))
+legend = get_legend(CNV.FDR_dup)
+
+CNV.FDR_dup <- ggplot(data = DEG_dream_merge_duplications, aes(Number.of.CNVGenes,log10(n+1))) +
+  geom_smooth(method = "lm")+
+  ylim(-1,5)+
+  geom_text(x = 20, y = 5, label = lm_eqn(DEG_dream_merge_duplications), parse = TRUE, size = 6)+
+  theme_cowplot()+
+  labs(title = "CNV Genes & DEG Count Duplications",subtitle="No 1q21.1DUP",y = "log10(DEG (FDR <0.05) Count)+1",x = "Number of Genes in CNV Region") + 
+  theme(plot.title = element_text(hjust = 0.5), plot.subtitle = element_text(hjust = 0.5))+
+  geom_point(aes(color = CNVGroup,shape = celltype, size=5))+
+  scale_color_manual(values = c("15q11.2 BP1-2" = "#66FF66", "16p11.2" = "#FF6666","22q11.2"="#FFB366","1q21.1"= "deepskyblue"))+
+  scale_shape_manual(values=c(15,16,17,18,0,1,2,3,4))+
+  NoLegend()
+CNV.FDR_dup
+
+legend_space <- plot_grid(NULL,legend,rel_widths = c(0.5,1))
+
+
+pdf("supfig10_CNVgenes_inverseLOEUF_FDRcounts_NEW_withshapiro_wilk_CLINGEN.pdf", width = 15, height = 12)
+first_row <- plot_grid(CNV.FDR.no1q_del, CNV.FDR_dup,align= "v",axis = "t", ncol = 2, labels = c("A","B"),  label_size=20)
+second_row <- plot_grid(loeuf_no1q21, legend, ncol = 2, labels=c("C",""), label_size=20)
+plot_grid(first_row,second_row , nrow=2)
+dev.off()
+
