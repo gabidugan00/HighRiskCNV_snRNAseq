@@ -1,0 +1,90 @@
+library(tidyverse)
+library(ggpubr)
+library(Seurat)
+library(gridExtra)
+library(cowplot)
+
+#Read in important data
+
+#DGE from dreamlet
+genelistNCvsC_dreamlet_refrmt<- readRDS("/data/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/genelistNCvsC_dreamlet_refrmt")
+
+#CNV annotations
+cnv_configs <- list(
+  "22" = list(chrom_num = "22", indices = 7:8, centromere = 14421733, arm_type = "qArm", arm_logic = "start >", wide_label = "Transcriptome.Wide.NoChr22", no_cnv_label = "Chr22_NoCNVGenes"),
+  "16" = list(chrom_num = "16", indices = 3:4, centromere = 38265669, arm_type = "pArm", arm_logic = "end <", wide_label = "Transcriptome.Wide.NoChr16", no_cnv_label = "Chr16_NoCNVGenes"),
+  "15" = list(chrom_num = "15", indices = 1:2, centromere = 18355109, arm_type = "qArm", arm_logic = "end >", wide_label = "Transcriptome.Wide.NoChr15", no_cnv_label = "Chr15_NoCNVGenes")
+)
+
+
+#Generate list for holding posts for each CNV
+
+all_plots <- list()
+
+for (cfg in cnv_configs) {
+  
+  target_cnvs <- names(genelistNCvsC_dreamlet_refrmt)[cfg$indices]
+  
+  for (cnv_name in target_cnvs) {
+  
+    combined_df <- bind_rows(lapply(names(genelistNCvsC_dreamlet_refrmt[[cnv_name]]), function(ct) {
+      df <- genelistNCvsC_dreamlet_refrmt[[cnv_name]][[ct]]
+      df$GRCH.38.Chromosome <- as.character(df$GRCH.38.Chromosome)
+      return(df)
+    }))
+    
+    cnv_genes <- combined_df %>% filter(CNV.Gene.New.ClinGen == "YES")
+    
+    if(nrow(cnv_genes) == 0) {
+      warning(paste("No CNV genes found for", cnv_name))
+      next
+    }
+    
+    c_min <- min(cnv_genes$GRCH.38.Gene.start, na.rm = TRUE)
+    c_max <- max(cnv_genes$GRCH.38.Gene.start, na.rm = TRUE)
+    arm_label <- paste0(cfg$arm_type, "_NoCNVGenes")
+    
+    final_df <- combined_df %>%
+      mutate(Location_RelationtoCNV = case_when(
+        CNV.Gene.New.ClinGen == "YES" ~ "CNV.Gene",
+        GRCH.38.Chromosome != cfg$chrom_num ~ cfg$wide_label,
+        TRUE ~ cfg$no_cnv_label
+      )) %>%
+      bind_rows(
+        combined_df %>% filter(GRCH.38.Chromosome == cfg$chrom_num, CNV.Gene.New.ClinGen == "NO", 
+                               GRCH.38.Gene.start > (c_min - 5e6), GRCH.38.Gene.start < (c_max + 5e6)) %>%
+          mutate(Location_RelationtoCNV = "Within5Mb_NoCNVGenes"),
+        combined_df %>% filter(GRCH.38.Chromosome == cfg$chrom_num, CNV.Gene.New.ClinGen == "NO", 
+                               GRCH.38.Gene.start > (c_min - 1e6), GRCH.38.Gene.start < (c_max + 1e6)) %>%
+          mutate(Location_RelationtoCNV = "Within1Mb_NoCNVGenes"),
+        combined_df %>% filter(GRCH.38.Chromosome == cfg$chrom_num, CNV.Gene.New.ClinGen == "NO") %>%
+          filter(if(cfg$arm_logic == "start >") GRCH.38.Gene.start > cfg$centromere else GRCH.38.Gene.end < cfg$centromere) %>%
+          mutate(Location_RelationtoCNV = arm_label)
+      )
+    
+    loc_levels <- c("CNV.Gene", "Within1Mb_NoCNVGenes", "Within5Mb_NoCNVGenes", arm_label, cfg$no_cnv_label, cfg$wide_label)
+    final_df$Location_RelationtoCNV <- factor(final_df$Location_RelationtoCNV, levels = rev(loc_levels))
+    
+    gene_counts <- final_df %>% group_by(Location_RelationtoCNV) %>% summarise(count = n_distinct(gene.name))
+    valid_groups <- gene_counts %>% filter(count > 1) %>% pull(Location_RelationtoCNV)
+    comps <- lapply(loc_levels[1:5], function(x) c(cfg$wide_label, x))
+    valid_comps <- comps[sapply(comps, function(x) all(x %in% valid_groups))]
+    
+    col_base <- if(grepl("del", cnv_name)) "tomato2" else "dodgerblue1"
+    
+    all_plots[[cnv_name]] <- ggboxplot(final_df, x = "Location_RelationtoCNV", y = "t", fill = "Location_RelationtoCNV", 
+                                       palette = rev(c(col_base, "#FFEB70", "gold", "#DBAE05", "darkgoldenrod", "grey40"))) +
+      geom_hline(yintercept = 0, linetype = 3) +
+      geom_text(data = gene_counts, aes(x = Location_RelationtoCNV, y = -Inf, label = count), vjust = -0.5, size = 4) +
+      labs(title = cnv_name, x = "", y = "t-statistic") +
+      theme(axis.text.x = element_text(angle = 60, hjust = 1)) + NoLegend()
+    
+    if(length(valid_comps) > 0) {
+      all_plots[[cnv_name]] <- all_plots[[cnv_name]] + stat_compare_means(comparisons = valid_comps, method = "wilcox.test", aes(label = ..p.adj..))
+    }
+  }
+}
+
+pdf("supfig9_proxCNV_cleaned_boxplot_t_stats.pdf", width = 20, height = 20)
+do.call(grid.arrange, c(all_plots[c(1, 3, 5, 2, 4, 6)], ncol = 3))
+dev.off()
