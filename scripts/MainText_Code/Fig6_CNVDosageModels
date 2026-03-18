@@ -1,0 +1,361 @@
+##High-risk CNVs Figures
+#Figure 6
+#Dugan et al. 
+
+setwd("/gpfs/gsfs12/users/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Redone_CNVFigures_FollowingMainTextCode")
+
+
+library(gtable)
+library(cowplot)
+library(ggplot2)
+library(ggpmisc)
+library("viridis")
+library(plyr)
+library(Seurat) 
+library(stringr)
+library(scCustomize)
+library(dplyr)
+library(gridExtra)
+library(cowplot)
+library(Seurat)
+library(readxl)
+
+#Read in dosage tests for 22q11.2 and 16p11.2 
+
+mirror22 <- readRDS("/gpfs/gsfs12/users/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/Removed_MT_RiboGenes/MirrorCNVs/GeneDosage+(1|BrainRegion)+(1|HBCC_BrNum)+(1|Match_group)/genelistNCvsC_dreamlet_22q11_dos_version099_Aug7")
+
+mirror16 <- readRDS("/gpfs/gsfs12/users/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/Removed_MT_RiboGenes/MirrorCNVs/GeneDosage+(1|BrainRegion)+(1|HBCC_BrNum)+(1|Match_group)/genelistNCvsC_dreamlet_16p11_dos_version099_Aug7")
+
+#add labels to dataframes
+mirror22 <- lapply(mirror22, function(celltype){
+  celltype$CNV <- "Mirror22q11.2"
+  return(celltype)
+}) 
+mirror16 <- lapply(mirror16, function(celltype){
+  celltype$CNV <- "Mirror16p11.2"
+  return(celltype)
+}) 
+
+#join dataframes
+genelist_dreamlet_mirror <- Map(bind_rows, mirror22, mirror16)
+genelist_dreamlet_mirror <- lapply(genelist_dreamlet_mirror, function(celltype){
+  celltype <- split(celltype,celltype$CNV)
+  return(celltype)
+})
+  
+##################################
+#Figure 6
+##################################
+#Part 1: barplot of DEGs
+DEG_dream <- list()
+DEG_count <- list()
+# Annotate dataframe by whether genes are differentially expressed and in what direction
+for (cell_type in names(genelist_dreamlet_mirror)) {
+  for (group in names(genelist_dreamlet_mirror[[cell_type]])) {
+    # Annotate differential expression and FDR status
+    genelist_dreamlet_mirror[[cell_type]][[group]] <- genelist_dreamlet_mirror[[cell_type]][[group]]
+    genelist_dreamlet_mirror[[cell_type]][[group]]$diffexpressed <- "NO"
+    genelist_dreamlet_mirror[[cell_type]][[group]]$diffexpressed[genelist_dreamlet_mirror[[cell_type]][[group]]$P.Value < 0.05 & genelist_dreamlet_mirror[[cell_type]][[group]]$t < 0] <- "DOWN"
+    genelist_dreamlet_mirror[[cell_type]][[group]]$diffexpressed[genelist_dreamlet_mirror[[cell_type]][[group]]$P.Value < 0.05 & genelist_dreamlet_mirror[[cell_type]][[group]]$t > 0] <- "UP"
+    
+    df <- genelist_dreamlet_mirror[[cell_type]][[group]]
+    
+    # Filter for differentially expressed genes
+    DEG_dream[[cell_type]][[group]] <- df %>%
+      filter(diffexpressed != "NO") %>%
+      mutate(
+        fdr_0.05 = ifelse(adj.P.Val < 0.05, "TRUE", "FALSE"),
+        Key = paste(diffexpressed, fdr_0.05, sep = "_")
+      ) %>%
+      dplyr::group_by(Key) %>%
+      dplyr::summarise(n = n(), .groups = "drop") %>%
+      dplyr::mutate(celltype = cell_type, group = group)
+  }
+  
+  # Combine results for each cell type
+  DEG_count[[cell_type]] <- do.call(rbind, DEG_dream[[cell_type]])
+}
+
+# Merge differential expression results
+DEG_dream_merge <- do.call(rbind, DEG_count)
+DEG_dream_merge$Celltype_Group <- paste(DEG_dream_merge$celltype, DEG_dream_merge$group, sep = "_")
+
+# Annotate and process FDR counts
+FDR_dream <- list()
+FDR_count <- list()
+
+for (cell_type in names(genelist_dreamlet_mirror)) {
+  for (cnv in names(genelist_dreamlet_mirror[[cell_type]])) {
+    FDR_dream[[cell_type]][[cnv]] <- genelist_dreamlet_mirror[[cell_type]][[cnv]] %>%
+      dplyr::filter(diffexpressed != "NO") %>%
+      dplyr::summarise(n = n(), .groups = "drop") %>%
+      dplyr::mutate(celltype = cell_type, group = cnv)
+  }
+  
+  FDR_count[[cell_type]] <- do.call(rbind, FDR_dream[[cell_type]])
+}
+
+# Merge FDR results
+FDR_count_merge <- do.call(rbind, FDR_count)
+FDR_count_merge$Celltype_Group <- paste(FDR_count_merge$celltype, FDR_count_merge$group, sep = "_")
+
+# Map FDR counts to DEG results
+DEG_dream_merge$N_FDR <- FDR_count_merge$n[match(DEG_dream_merge$Celltype_Group, FDR_count_merge$Celltype_Group)]
+
+# Simplify Key labels and adjust factors
+DEG_dream_merge <- DEG_dream_merge %>%
+  mutate(
+    Key = revalue(Key, c(
+      "DOWN_FALSE" = "Downregulated (P-Value <0.05)",
+      "DOWN_TRUE" = "Downregulated (FDR <0.05)",
+      "UP_FALSE" = "Upregulated (P-Value <0.05)",
+      "UP_TRUE" = "Upregulated (FDR <0.05)"
+    )),
+    celltype = revalue(celltype, c(
+      "Inhibitory_CGE" = "CGE-Derived Inhibitory Neurons",
+      "Inhibitory_MGE" = "MGE-Derived Inhibitory Neurons",
+      "L2_3Excitatory" = "Upper Layer Excitatory Neurons",
+      "L5_6Excitatory" = "Lower Layer Excitatory Neurons",
+      "Oligodendrocytes" = "Oligos"
+    )),
+    # Define the correct order of celltypes
+    celltype = factor(celltype, 
+                      levels = c("VLMC_Endo", "OPC", "Oligos", "Microglia", "Astrocyte", "Upper Layer Excitatory Neurons", "Lower Layer Excitatory Neurons", "MGE-Derived Inhibitory Neurons", "CGE-Derived Inhibitory Neurons")),
+    # Reorder 'Key' to display down-regulated (p-value < 0.05) first, followed by down-regulated (FDR < 0.05), then up-regulated categories
+    Key = factor(Key, 
+                 levels = c("Downregulated (P-Value <0.05)", "Downregulated (FDR <0.05)",
+                            "Upregulated (P-Value <0.05)", "Upregulated (FDR <0.05)")),
+    N_Dir = ifelse(grepl("Down", Key), -n, n)
+  )
+
+DEG_dream_merge$group <- sub("Mirror","",DEG_dream_merge$group)
+DEG_dream_merge$group <- factor(DEG_dream_merge$group, levels = c("22q11.2",  "16p11.2"))
+
+# Create bar plot of DEG counts
+DEG_counts_barplot <- ggplot(DEG_dream_merge, aes(x = celltype, y = N_Dir, fill = Key)) +
+  geom_bar(stat = "identity", position = "stack") +
+  scale_fill_manual(values = c("dodgerblue", "dodgerblue4", "firebrick1", "firebrick3")) +
+  coord_flip() +
+  labs(
+    title = "Number of DEGs by CNV & Cell Type",
+    x = "Cell Type",
+    y = "DEGs"
+  ) +
+  facet_wrap(~ group, ncol = 4) +
+  theme_cowplot() +
+  theme(
+    legend.position = "top",
+    legend.justification = "center",
+    strip.text.x = element_text(size = 20),
+    axis.text.y = element_text(size = 20),
+    axis.text.x = element_text(size = 20),
+    plot.title = element_text(size = 30, hjust = 0.5))
+
+library(GO.db)
+go <- keys(GO.db, keytype="GOID")
+df_bp <- select(GO.db, columns=c("GOID","TERM"), keys="BP", keytype="ONTOLOGY")
+df_bp$newGOID <- sub(":","",df_bp$GOID)
+df_bp$newGOID <- paste(df_bp$newGOID,": ",df_bp$TERM, sep="")
+
+#Enrichment of GO database 
+original_gene_list<- list()
+gene_list<- list()
+for(cell_type in names(genelist_dreamlet_mirror)){for(cnv in names(genelist_dreamlet_mirror[[cell_type]])){
+  # we want the log2 fold change
+  original_gene_list[[cell_type]][[cnv]] <- genelist_dreamlet_mirror[[cell_type]][[cnv]]$logFC
+  # name the vector
+  names(original_gene_list[[cell_type]][[cnv]]) <- genelist_dreamlet_mirror[[cell_type]][[cnv]]$gene
+  # omit any NA values 
+  gene_list[[cell_type]][[cnv]]<-na.omit(original_gene_list[[cell_type]][[cnv]])
+  #sort the list in decreasing order (required for clusterProfiler)
+  gene_list[[cell_type]][[cnv]] = sort(gene_list[[cell_type]][[cnv]], decreasing= TRUE)
+}}
+
+library(zenith)
+go.gs = get_GeneOntology(to="SYMBOL")
+
+GO_terms <- list()
+for(i in 1:length(go.gs)){
+  GO_terms[[i]] <- go.gs[[i]]@geneIds
+}
+
+names(GO_terms) <- names(go.gs)
+library(fgsea)
+
+fgseaRes_mirror<- list()
+for(cell_type in names(gene_list)){for(cnv in names(gene_list[[cell_type]])){
+  fgseaRes_mirror[[i]][[j]] <- fgsea(pathways = GO_terms, stats    = gene_list[[i]][[j]],eps = 0.0,minSize = 15,maxSize  = 500, nPermSimple = 1000)
+}}
+
+
+fgsea_16p <- readRDS("/data/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/Removed_MT_RiboGenes/MirrorCNVs/GeneDosage+(1|BrainRegion)+(1|HBCC_BrNum)+(1|Match_group)/DefaultDreamlet_FGSEA/fgseaRes_16p11_gd_aug7")
+fgsea_22q <- readRDS("/data/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/Removed_MT_RiboGenes/MirrorCNVs/GeneDosage+(1|BrainRegion)+(1|HBCC_BrNum)+(1|Match_group)/DefaultDreamlet_FGSEA/fgseaRes_22q11_gd_aug7")
+
+ct <- names(fgsea_16p)
+fgsea_16p <- lapply(names(fgsea_16p), function(ct) {
+  df <- fgsea_16p[[ct]]
+  df$CNV <- "16p11"
+  df$celltype <- ct
+  df
+})
+names(fgsea_16p) <- ct
+
+ct <- names(fgsea_22q)
+fgsea_22q <- lapply(names(fgsea_22q), function(ct) {
+  df <- fgsea_22q[[ct]]
+  df$CNV <- "22q11"
+  df$celltype <- ct
+  df
+})
+names(fgsea_22q) <-ct
+
+
+fdr_sig_16p <- lapply(fgsea_16p, function(filter){
+  filter <- filter[filter$padj <0.05,]
+  return(filter)
+})
+
+fdr_sig_16p_merge <- Reduce(rbind, fdr_sig_16p)
+fdr_sig_16p_merge_count <- fdr_sig_16p_merge %>%
+  dplyr::group_by(pathway) %>%
+  dplyr::summarise(Count = dplyr::n(), Sum_p = sum(padj, na.rm = TRUE), CNV = "167p11") %>%
+  dplyr::ungroup()
+
+fdr_sig_22q <- lapply(fgsea_22q, function(filter){
+  filter <- filter[filter$padj <0.05,]
+  return(filter)
+})
+
+fdr_sig_22q_merge <- Reduce(rbind, fdr_sig_22q)
+fdr_sig_22q_merge_count <- fdr_sig_22q_merge %>%
+  dplyr::group_by(pathway) %>%
+  dplyr::summarise(Count = dplyr::n(), Sum_p = sum(padj, na.rm = TRUE),CNV = "22q11") %>%
+  dplyr::ungroup()
+
+fgsea_list <- list(fgsea_16p, fgsea_22q)
+names(fgsea_list) <- c("CNV16p11","CNV22q11")
+
+
+# Filter significant pathways (FDR < 0.05)
+FDR_sig_fgsea <- lapply(fgsea_list, function(celltype_res) {
+  lapply(celltype_res, function(cnv_res) {
+    subset(cnv_res, padj < 0.05)
+  })
+})
+
+# Merge significant fgsea results by cell type
+FDR_sig_merge <- lapply(names(FDR_sig_fgsea), function(celltype) {
+  lapply(names(FDR_sig_fgsea[[celltype]]), function(cnv) {
+    if (nrow(FDR_sig_fgsea[[celltype]][[cnv]]) > 0) {
+      data <- FDR_sig_fgsea[[celltype]][[cnv]]
+      data <- data %>%
+        mutate(CNV = str_remove_all(CNV, ".*CNV|WBS |BP1-2 "))
+      return(data)
+    }
+    NULL
+  }) %>% compact() %>% bind_rows()
+})
+names(FDR_sig_merge) <- names(FDR_sig_fgsea)
+
+# Filter for BP terms
+FDR_sig_merge_BP <- lapply(FDR_sig_merge, function(data) {
+  if (!is.null(data)) {
+    GO_ID_full <- sub(":.*", "", data$pathway)
+    GO_ID <- sub(".*GO", "", GO_ID_full)
+    GO_ID_edit <- paste("GO:", GO_ID, sep = "")
+    data$GO_ID <- GO_ID_edit
+    data <- data[data$GO_ID %in% df_bp$GOID, ]
+    return(data)
+  }
+  NULL
+})
+
+# Analyze pathway convergence and compute summary statistics
+topterms <- lapply(FDR_sig_merge_BP, function(data) {
+  if (!is.null(data)) {
+    freq <- data %>%
+      dplyr::group_by(pathway) %>%
+      dplyr::summarise(Frequency = n(), .groups = "drop")
+    
+    log_padj_sum <- data %>%
+      dplyr::group_by(pathway) %>%
+      dplyr::summarise(SumLogPadj = sum(log(padj)), .groups = "drop")
+    
+    combined <- left_join(freq, log_padj_sum, by = "pathway") %>%
+      dplyr::arrange(desc(Frequency), SumLogPadj)%>%
+      dplyr::slice_head(n=10)
+    
+    return(combined)
+  }
+  NULL
+})
+
+# Merge results for plotting
+fgseaRes_merge <- lapply(names(fgsea_list), function(cnv) {
+  lapply(names(fgsea_list[[cnv]]), function(celltype) {
+    if (nrow(fgsea_list[[cnv]][[celltype]]) > 0) {
+      data <- fgsea_list[[cnv]][[celltype]]
+      data <- data[data$pathway %in% topterms[[cnv]]$pathway, ]
+      data$celltype <- recode(celltype,
+                              "Inhibitory_CGE" = "CGE-Derived Inhibitory Neurons", "Inhibitory_MGE" = "MGE-Derived Inhibitory Neurons", "L2_3Excitatory" = "Upper Layer Excitatory Neurons","L5_6Excitatory" = "Lower Layer Excitatory Neurons","Oligodendrocytes" = "Oligos")
+      return(data)
+    }
+    NULL
+  }) %>% compact() %>% bind_rows()
+})
+
+
+names(fgseaRes_merge) <- names(fgsea_list)
+
+fgseaRes_merge2 <- Reduce(rbind, fgseaRes_merge)
+
+# Add annotations and metadata for plotting
+fgseaRes_merge_cd_full <- fgseaRes_merge2 %>%
+  mutate(
+    FDR_Sig = case_when(
+      padj <= 0.001 ~ "***",
+      padj <= 0.01 ~ "**",
+      padj <= 0.05 ~ "*",
+      TRUE ~ ""
+    ),
+    Description = str_extract(pathway, ":.*") %>% sub(":", "", .),
+    celltype = factor(celltype, levels = rev(c(
+      "VLMC_Endo", "OPC", "Oligos", "Microglia", "Astrocyte",
+      "Upper Layer Excitatory Neurons", "Lower Layer Excitatory Neurons",
+      "MGE-Derived Inhibitory Neurons", "CGE-Derived Inhibitory Neurons"
+    )))
+    )
+
+fgseaRes_merge_cd_full$CNV <- factor(fgseaRes_merge_cd_full$CNV, levels = c("22q11","16p11"))
+# Plot results
+topterm_heatmap <- ggplot(fgseaRes_merge_cd_full, aes(x = celltype, y = Description, fill = NES)) + 
+  geom_tile() +
+  geom_text(aes(label = FDR_Sig), size = 10) +
+  theme_bw() +
+  ggtitle("Most Convergent Terms across Cell Types for Mirror CNVs") +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 30),
+    panel.background = element_rect(color = "grey50"),
+    panel.border = element_rect(colour = "black"),
+    strip.text.y = element_text(size = 20, angle = 0),
+    strip.text.x = element_text(size = 20),
+    axis.text.y = element_text(size = 25, color = "black"),
+    axis.text.x = element_text(size = 0)
+  ) +
+  facet_grid(cols =vars(celltype), rows = vars(CNV), 
+    drop = TRUE, 
+    scales = "free", 
+    space = "free", 
+    labeller = labeller(celltype = label_wrap_gen(width = 8))
+  ) +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0) +
+  geom_vline(xintercept = 0, linetype = 3, color = "red") +
+  xlab("") +
+  ylab("") +
+  scale_y_discrete(labels = function(y) str_wrap(y, width = 100))
+
+topterm_heatmap 
+
+pdf("figure6_newfdr.pdf", width =26, height = 30)
+plot_grid(NULL,DEG_counts_barplot,topterm_heatmap, ncol =1, rel_heights =c(1,1.5,6), labels =c("A","B","C"), label_size = 30)
+dev.off()
