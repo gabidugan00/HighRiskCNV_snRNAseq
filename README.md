@@ -6,7 +6,7 @@ Affiliations: 1 Human Genetics Branch, 2 Human Brain Collection Core (HBCC),3 Cl
 
 *Denotes equal contribution
 
-## Data 
+## Data: 
 Differential gene expression results from dreamlet can be downloaded in Supplementary Table 8. Rank-based functional enrichment results can be downloaded in Supplementary Table 9. Filtered Seurat object can be found at -- and raw fastq files can be found on NIMH Data Archives (NDA). 
 
 ## Abstract: 
