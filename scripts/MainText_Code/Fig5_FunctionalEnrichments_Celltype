@@ -1,0 +1,353 @@
+##High-risk CNVs Figures
+#Figure 5
+#Dugan et al. 
+
+#Load libraries
+library(GO.db)
+library(ggplot2)
+library(stringr)
+library(grid)
+library(readxl)
+library(GSEABase)
+library(zenith)
+library(ggpmisc)
+library(cowplot)
+library(scales)
+library(lme4)
+library(Seurat)
+library(lmerTest)
+library(tidyverse)
+
+# Read in data
+#Dreamlet Results
+genelistNCvsC_dreamlet <- readRDS("/data/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/Removed_MT_RiboGenes/~CNV+(1|Region)+(1|Match_group)+(1|HBCC_BrNum)/genelistNCvsC_dreamlet")
+
+# Read all sheets into a named list
+sheet_names <- excel_sheets("genelistNCvsC_dreamlet.xlsx")
+flat_list_read <- lapply(sheet_names, function(sheet) {
+  read_xlsx("genelistNCvsC_dreamlet.xlsx", sheet = sheet)
+})
+names(flat_list_read) <- sheet_names
+
+genelistNCvsC_dreamlet <- list()
+for (name in names(flat_list_read)) {
+  parts <- strsplit(name, "__")[[1]]
+  cnv <- parts[2]
+  celltype <- parts[1]
+  
+  if (!celltype %in% names(genelistNCvsC_dreamlet)) {
+    genelistNCvsC_dreamlet[[celltype]] <- list()
+  }
+  
+  genelistNCvsC_dreamlet[[celltype]][[cnv]] <- flat_list_read[[name]]
+}
+
+gene_sig <- lapply(genelistNCvsC_dreamlet, function(celltype_res) {
+  lapply(celltype_res, function(cnv_res) {
+    subset(cnv_res, adj.P.Val < 0.05)
+  })
+})
+
+# GSEA results
+fgseaRes <- readRDS("/gpfs/gsfs12/users/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/Removed_MT_RiboGenes/~CNV+(1|Region)+(1|Match_group)+(1|HBCC_BrNum)/fGSEA_t/fgseaRes_t")
+
+##################################
+# Figure 5
+##################################
+# Load GO data and filter for biological process (BP) terms
+go <- keys(GO.db, keytype = "GOID")
+df_bp <- AnnotationDbi::select(GO.db, columns = c("GOID", "TERM"), keys = "BP", keytype = "ONTOLOGY")
+
+#PART 1: Top terms by celltype
+# Filter significant pathways (FDR < 0.050)
+FDR_sig_fgsea <- lapply(fgseaRes, function(celltype_res) {
+  lapply(celltype_res, function(cnv_res) {
+    subset(cnv_res, padj < 0.05)
+  })
+})
+
+# Merge significant fgsea results by cell type
+FDR_sig_merge <- lapply(names(FDR_sig_fgsea), function(celltype) {
+  lapply(names(FDR_sig_fgsea[[celltype]]), function(cnv) {
+    if (nrow(FDR_sig_fgsea[[celltype]][[cnv]]) > 0) {
+      data <- FDR_sig_fgsea[[celltype]][[cnv]]
+      data <- data %>%
+        mutate(CNV = str_remove_all(CNV, ".*CNV|WBS |BP1-2 "))
+      return(data)
+    }
+    NULL
+  }) %>% compact() %>% bind_rows()
+})
+names(FDR_sig_merge) <- names(FDR_sig_fgsea)
+
+# Filter for BP terms
+FDR_sig_merge_BP <- lapply(FDR_sig_merge, function(data) {
+  if (!is.null(data)) {
+    GO_ID_full <- sub(":.*", "", data$pathway)
+    GO_ID <- sub(".*GO", "", GO_ID_full)
+    GO_ID_edit <- paste("GO:", GO_ID, sep = "")
+    data$GO_ID <- GO_ID_edit
+    data <- data[data$GO_ID %in% df_bp$GOID, ]
+    return(data)
+  }
+  NULL
+})
+
+# Analyze pathway convergence and compute summary statistics
+topterms <- lapply(FDR_sig_merge_BP, function(data) {
+  if (!is.null(data)) {
+    freq <- data %>%
+      dplyr::group_by(pathway) %>%
+      dplyr::summarise(Frequency = n(), .groups = "drop")
+    
+    log_padj_sum <- data %>%
+      dplyr::group_by(pathway) %>%
+      dplyr::summarise(SumLogPadj = sum(log(padj)), .groups = "drop")
+    
+    combined <- left_join(freq, log_padj_sum, by = "pathway") %>%
+      dplyr::arrange(desc(Frequency), SumLogPadj)%>%
+      dplyr::slice_head(n=5)
+    
+    return(combined)
+  }
+  NULL
+})
+
+# Merge results for plotting
+fgseaRes_merge <- lapply(names(fgseaRes), function(celltype) {
+  lapply(names(fgseaRes[[celltype]]), function(cnv) {
+    if (nrow(fgseaRes[[celltype]][[cnv]]) > 0) {
+      data <- fgseaRes[[celltype]][[cnv]]
+      data <- data[data$pathway %in% topterms[[celltype]]$pathway, ]
+      data$celltype <- recode(celltype,
+                              "Inhibitory_CGE" = "CGE-Derived Inhibitory Neurons",
+                              "Inhibitory_MGE" = "MGE-Derived Inhibitory Neurons",
+                              "L2_3Excitatory" = "Upper Layer Excitatory Neurons",
+                              "L5_6Excitatory" = "Lower Layer Excitatory Neurons",
+                              "Oligodendrocytes" = "Oligos")
+      data <- data %>%
+        mutate(
+        CNV = str_remove_all(CNV, ".*CNV|WBS |BP1-2 "))
+      return(data)
+    }
+    NULL
+  }) %>% compact() %>% bind_rows()
+})
+
+names(fgseaRes_merge) <- names(fgseaRes)
+
+fgseaRes_merge2 <- Reduce(rbind, fgseaRes_merge)
+
+fgseaRes_merge_cd_full <- fgseaRes_merge2 %>%
+  mutate(
+    FDR_Sig = case_when(
+      padj <= 0.001 ~ "***",
+      padj <= 0.01 ~ "**",
+      padj <= 0.05 ~ "*",
+      TRUE ~ ""
+    ),
+    CNVType = ifelse(grepl("dup", CNV), "DUP", "DEL"),
+    CNVGroup = str_replace(CNV, " (del|dup).*", ""),
+    Description = str_extract(pathway, ":.*") %>% sub(":", "", .),
+    celltype = factor(celltype, levels = rev(c(
+      "VLMC_Endo", "OPC", "Oligos", "Microglia", "Astrocyte",
+      "Upper Layer Excitatory Neurons", "Lower Layer Excitatory Neurons",
+      "MGE-Derived Inhibitory Neurons", "CGE-Derived Inhibitory Neurons"
+    ))),
+    CNVGroup <- factor(
+      CNVGroup,
+      levels = c("22q11.2", "16p11.2", "15q11.2", "1q21.1","7q11.23")
+    )
+  )
+fgseaRes_merge_cd_full$CNVGroup<- factor(
+  fgseaRes_merge_cd_full$CNVGroup,
+  levels = c("22q11.2", "16p11.2", "15q11.2", "1q21.1","7q11.23")
+)
+# Plot results
+topterm_heatmap <- ggplot(fgseaRes_merge_cd_full, aes(x = CNVType, y = Description, fill = NES)) + 
+  geom_tile() +
+  geom_text(aes(label = FDR_Sig), size = 10) +
+  theme_bw() +
+  ggtitle("Most Convergent Terms across CNVs for each Cell Type") +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 30),
+    panel.background = element_rect(color = "grey50"),
+    panel.border = element_rect(colour = "black"),
+    strip.text.y = element_text(size = 30, angle = 0),
+    strip.text.x = element_text(size = 25),
+    axis.text.y = element_text(size = 25, color = "black"),
+    axis.text.x = element_text(size = 30)
+  ) +
+  facet_grid(
+    cols = vars(CNVGroup), 
+    rows = vars(celltype), 
+    drop = TRUE, 
+    scales = "free", 
+    space = "free", 
+    labeller = labeller(CNVGroup = label_wrap_gen(width = 10), celltype = label_wrap_gen(width = 8))
+  ) +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0) +
+  geom_vline(xintercept = 0, linetype = 3, color = "red") +
+  xlab("") +
+  ylab("") +
+  scale_y_discrete(labels = function(y) str_wrap(y, width = 100))
+
+topterm_heatmap 
+
+#PART 2: Line plots
+# Gene list processing
+library(GSEABase)
+go.gs = get_GeneOntology(to="SYMBOL")
+gs1 ="GO0006119: oxidative phosphorylation"
+genes = sort(geneIds(go.gs[[gs1]]))
+
+# Merge genelistNCvsC_dreamlet
+genelistNCvsC_dreamlet_reduce <- lapply(genelistNCvsC_dreamlet, function(x) Reduce(rbind, x))
+genelistNCvsC_dreamlet_reduce2 <- Reduce(rbind, genelistNCvsC_dreamlet_reduce)
+
+# Define a function to extract pathway-specific genes
+extract_pathway_genes <- function(go_id, genelist) {
+  genes <- sort(geneIds(go.gs[[go_id]]))
+  subset_data <- genelist %>%
+    dplyr::filter(gene.name %in% genes) 
+  return(subset_data)
+}
+
+# Rename celltype labels
+relabel_celltypes <- function(df) {
+  revalue(df$celltype, c(
+    "Inhibitory_CGE" = "CGE-Derived Inhibitory Neurons",
+    "Inhibitory_MGE" = "MGE-Derived Inhibitory Neurons",
+    "L2_3Excitatory" = "Upper Layer Excitatory Neurons",
+    "L5_6Excitatory" = "Lower Layer Excitatory Neurons"
+  ))
+}
+
+# OXPHOS Pathway
+library(plyr)
+oxphos_reduce2 <- extract_pathway_genes("GO0006119: oxidative phosphorylation", genelistNCvsC_dreamlet_reduce2)
+oxphos_reduce2$celltype <- relabel_celltypes(oxphos_reduce2)
+oxphos_neurons <- dplyr::filter(oxphos_reduce2, grepl("Neuron", celltype))
+oxphos_neurons_mean <- oxphos_neurons %>%
+  dplyr::group_by(celltype, CNV) %>%
+  dplyr::summarise(Mean.T.Stat.Oxphos = mean(t), .groups = 'drop')
+
+# Presynaptic Pathway
+presyn_reduce2 <- extract_pathway_genes("GO0098793: presynapse", genelistNCvsC_dreamlet_reduce2)
+presyn_reduce2$celltype <- relabel_celltypes(presyn_reduce2)
+presyn_neurons <- dplyr::filter(presyn_reduce2, grepl("Neuron", celltype))
+presyn_neurons_mean <- presyn_neurons %>%
+  dplyr::group_by(celltype, CNV) %>%
+  dplyr::summarise(Mean.T.Stat.presyn = mean(t), .groups = 'drop')
+
+# Merge OXPHOS and Presynaptic data
+neuron_mean_t <- presyn_neurons_mean %>%
+  mutate(CNV_Celltype = paste(CNV, celltype, sep = "_")) %>%
+  left_join(
+    oxphos_neurons_mean %>%
+      mutate(CNV_Celltype = paste(CNV, celltype, sep = "_")) %>%
+      dplyr::select(CNV_Celltype, Mean.T.Stat.Oxphos),
+    by = "CNV_Celltype"
+  ) %>%
+  mutate(CNV = str_remove_all(CNV, ".*CNV|WBS |BP1-2 "))
+
+
+# Remove 1q21.1 deletion
+neuron_mean_t_no1q <- dplyr::filter(neuron_mean_t, CNV != "1q21.1 del")
+
+library(ggpmisc)
+# Plot
+presyn_tstat_no1q21 <- ggplot(neuron_mean_t_no1q, aes(x = Mean.T.Stat.Oxphos, y = log(Mean.T.Stat.presyn + 1))) +
+  ylim(-1, 1.5) +
+  stat_poly_line(data = neuron_mean_t_no1q,method = "lm", formula = y ~x, fill = "khaki2", color = "black") +
+  stat_poly_eq(use_label(c("eq", "adj.R2", "p")), size = 10) +
+  geom_point(aes(color = CNV), size = 10) +
+  scale_color_manual(values = c(
+    "16p11.2 del" = "#FB9A99", "16p11.2 dup" = "#E31A1C",
+    "22q11.2 del" = "#FDBF6F", "22q11.2 dup" = "#FF7F00",
+    "15q11.2 del" = "#B2DF8A", "15q11.2 dup" = "#33A02C",
+    "1q21.1 dup" = "#1F78B4", "7q11.23 del" = "#CAB2D6"
+  )) +
+  theme_cowplot() +
+  labs(
+    x = "Mean T-Stat Across OXPHOS Genes",
+    y = "log(Mean T-Stat Across Presynapse Genes + 1)",
+    title = "OXPHOS & Presynapse Association"
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 30),
+    axis.title.x = element_text(size = 25),
+    axis.title.y = element_text(size = 25),
+    axis.text = element_text(size = 15),
+    legend.text = element_text(size = 20),
+    legend.position = "bottom",
+    legend.justification = "center"
+  )
+
+# Linear mixed model
+library(lmerTest)
+neuron_mean_t_no1q$log.trans <- log(neuron_mean_t_no1q$Mean.T.Stat.presyn + 1)
+lmer_presyn_oxphos <- lmer(log(Mean.T.Stat.presyn + 1) ~ Mean.T.Stat.Oxphos + (1 | CNV), data = neuron_mean_t_no1q)
+summary(lmer_presyn_oxphos)
+shapiro.test(resid(lmer_presyn_oxphos))
+
+# Postsynaptic Pathway
+postsyn_reduce2 <- extract_pathway_genes("GO0014069: postsynaptic density", genelistNCvsC_dreamlet_reduce2)
+postsyn_reduce2$celltype <- relabel_celltypes(postsyn_reduce2)
+postsyn_neurons <- dplyr::filter(postsyn_reduce2, grepl("Neuron", celltype))
+postsyn_neurons_mean <- postsyn_neurons %>%
+  dplyr::group_by(celltype, CNV) %>%
+  dplyr::summarise(Mean.T.Stat.postsyn = mean(t), .groups = 'drop')
+
+# Merge for postsynaptic plotting
+neuron_mean_t <- postsyn_neurons_mean %>%
+  mutate(CNV_Celltype = paste(CNV, celltype, sep = "_")) %>%
+  left_join(
+    oxphos_neurons_mean %>%
+      mutate(CNV_Celltype = paste(CNV, celltype, sep = "_")) %>%
+      dplyr::select(CNV_Celltype, Mean.T.Stat.Oxphos),
+    by = "CNV_Celltype"
+  ) %>%
+  mutate(CNV = str_remove_all(CNV, ".*CNV|WBS |BP1-2 "))
+
+# Remove 1q21.1 deletion
+neuron_mean_t_no1q <- dplyr::filter(neuron_mean_t, CNV != "1q21.1 del")
+  
+# Plot for postsynaptic pathway
+postsyn_tstat_no1q21 <- ggplot(neuron_mean_t_no1q, aes(x = Mean.T.Stat.Oxphos, y = log(Mean.T.Stat.postsyn + 1))) +
+  stat_poly_line(method = "lm", formula = log(y + 1) ~ x, fill = "khaki2", color = "black") +
+  ylim(-1, 1.5) +
+  stat_poly_eq(use_label(c("eq", "adj.R2", "p")), size = 10) +
+  geom_point(aes(color = CNV), size = 10) +
+  scale_color_manual(values = c(
+    "16p11.2 del" = "#FB9A99", "16p11.2 dup" = "#E31A1C",
+    "22q11.2 del" = "#FDBF6F", "22q11.2 dup" = "#FF7F00",
+    "15q11.2 del" = "#B2DF8A", "15q11.2 dup" = "#33A02C",
+    "1q21.1 dup" = "#1F78B4", "7q11.23 del" = "#CAB2D6"
+  )) +
+  theme_cowplot() +
+  labs(
+    x = "Mean T-Stat Across OXPHOS Genes",
+    y = "log(Mean T-Stat Across Postsynapse Genes + 1)",
+    title = "OXPHOS & Postsynapse Association"
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 30),
+    axis.title.x = element_text(size = 25),
+    axis.title.y = element_text(size = 25),
+    axis.text = element_text(size = 15),
+    legend.text = element_text(size = 20),
+    legend.position = "bottom",
+    legend.justification = "center"
+  )
+
+second_row<- plot_grid(NULL,NULL,labels = c("B","C"), label_size= 30)
+third_row <- plot_grid(presyn_tstat_no1q21+NoLegend(),postsyn_tstat_no1q21+NoLegend(), ncol =2, rel_widths = c(1,1))
+legend <- get_legend(postsyn_tstat_no1q21)
+
+
+pdf("march2026_figure5_tstat.pdf", width =26, height = 36)
+plot_grid(topterm_heatmap,second_row,third_row,legend, ncol =1, rel_heights =c(3,0.1,1,0.3), labels =c("A","","",""), label_size = 30)
+dev.off()
+
+
