@@ -1,4 +1,4 @@
-##High-risk CNVs Figures
+#FINAL CODE FOR ALL MAIN FIGURES 
 
 ##################################
 #Figure 5
@@ -50,7 +50,7 @@ gene_sig <- lapply(genelistNCvsC_dreamlet, function(celltype_res) {
 })
 
 # GSEA results
-fgseaRes <- readRDS("/gpfs/gsfs12/users/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/Removed_MT_RiboGenes/~CNV+(1|Region)+(1|Match_group)+(1|HBCC_BrNum)/fGSEA_t/fgseaRes_t")
+fgseaRes <- readRDS("/fgseaRes_t")
 
 ##################################
 # Figure 5
