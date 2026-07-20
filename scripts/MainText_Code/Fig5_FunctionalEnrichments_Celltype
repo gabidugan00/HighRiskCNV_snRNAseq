@@ -20,7 +20,7 @@ library(tidyverse)
 
 # Read in data
 #Dreamlet Results
-genelistNCvsC_dreamlet <- readRDS("/data/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Adults/AfterDoubletRemoval/Harmony_MG/FilterClusters_PercentMT2_5/Harmony_MG/FilterClusters_PercentMT2/Harmony_MG/DifferentialGeneExpression/Dreamlet/DropSample30/Removed_MT_RiboGenes/~CNV+(1|Region)+(1|Match_group)+(1|HBCC_BrNum)/genelistNCvsC_dreamlet")
+genelistNCvsC_dreamlet <- readRDS("/genelistNCvsC_dreamlet")
 
 # Read all sheets into a named list
 sheet_names <- excel_sheets("genelistNCvsC_dreamlet.xlsx")
