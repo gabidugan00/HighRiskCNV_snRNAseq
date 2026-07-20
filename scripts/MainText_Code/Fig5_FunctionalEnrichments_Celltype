@@ -1,7 +1,8 @@
 ##High-risk CNVs Figures
-#Figure 5
-#Dugan et al. 
 
+##################################
+#Figure 5
+##################################
 #Load libraries
 library(GO.db)
 library(ggplot2)
