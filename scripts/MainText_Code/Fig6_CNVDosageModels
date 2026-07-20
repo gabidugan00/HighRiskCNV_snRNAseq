@@ -1,10 +1,9 @@
-##High-risk CNVs Figures
+#FINAL CODE FOR ALL MAIN FIGURES 
+
+##################################
 #Figure 6
-#Dugan et al. 
-
-setwd("/gpfs/gsfs12/users/HGBomics/GabiDugan/SNCNV_data_AdditionalSeqDec2022/February2023_Pipeline/scDblFinder/Redone_CNVFigures_FollowingMainTextCode")
-
-
+##################################
+#Load libraries
 library(gtable)
 library(cowplot)
 library(ggplot2)
