@@ -31,18 +31,14 @@ cfg <- list(
   seurat_rds      = "seurat_adult_annotated.rds",
   cnv_genes_rds   = "genes_in_cnv_regions.rds",
   gene_coords_csv = "biomart_genes_GRCh37.csv",
-  exclude_samples = "Sample_30_HBCC_2550_ACC",   # state the exclusion reason in Methods
-  # Genes removed before DE: cytosolic ribosomal protein genes and mitochondrial-
-  # encoded genes. Anchored so nuclear-encoded mitochondrial ribosomal genes
-  # (MRPL*, MRPS*) are RETAINED. The original script used unanchored "RPL|RPS|MT-"
-  # which also removed MRPL*/MRPS*; see CHANGES_AND_ISSUES.md.
+  exclude_samples = "Sample_30_HBCC_2550_ACC",  
   gene_exclude_regex = "^(RPL|RPS)[0-9]|^RPLP[0-2]$|^MT-",
-  min_cells       = 0,       # dreamlet processAssays(min.cells); dreamlet default is 5
+  min_cells       = 0,    
   fdr_threshold   = 0.1,
   nominal_p       = 0.05,
   convergence_fdr = c(0.1, 0.5),
   n_workers       = 6,
-  run_sensitivity = TRUE,    # extra covariate models (section 2)
+  run_sensitivity = TRUE,   
   recompute       = FALSE
 )
 
