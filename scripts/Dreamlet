@@ -11,8 +11,9 @@ suppressPackageStartupMessages({
   library(variancePartition)
   library(zenith)
   library(GSEABase)
+  library(GO.db)
   library(BiocParallel)
-  library(lmerTest)       # lmer with p-values
+  library(lmerTest)       
   library(dplyr)
   library(tidyr)
   library(tibble)
